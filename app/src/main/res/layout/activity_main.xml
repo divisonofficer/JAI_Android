@@ -1,0 +1,469 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Laid out like MobileOkad's camera screen: the preview owns the top, the dial and the
+    mode pills sit above a black shutter bar, and the chips float over the picture.
+-->
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:fitsSystemWindows="true"
+    tools:context=".MainActivity">
+
+    <!-- Square, like what is saved: 1080x1080 upright from the sideways-mounted camera. -->
+    <ImageView
+        android:id="@+id/preview"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:contentDescription="@string/preview_description"
+        android:scaleType="fitCenter"
+        app:layout_constraintDimensionRatio="1:1"
+        app:layout_constraintBottom_toTopOf="@id/settings_line"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- The camera chip: the dot is the connection, a tap reconnects. -->
+    <LinearLayout
+        android:id="@+id/chip_camera"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/mode_pill"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <View
+            android:id="@+id/dot_camera"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/status_dot" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="7dp"
+            android:letterSpacing="0.06"
+            android:text="@string/camera_jai"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Preview rate and link, the two numbers that say whether the cable is keeping up. -->
+    <TextView
+        android:id="@+id/chip_info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/mode_pill"
+        android:fontFamily="monospace"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        android:textColor="@android:color/white"
+        android:textSize="11sp"
+        app:layout_constraintBottom_toBottomOf="@id/chip_camera"
+        app:layout_constraintStart_toEndOf="@id/chip_camera"
+        app:layout_constraintTop_toTopOf="@id/chip_camera"
+        tools:text="5.0 fps · 10.121.136.200" />
+
+    <!-- The depth camera, a row below the JAI's: dot is the connection, a tap reconnects. -->
+    <LinearLayout
+        android:id="@+id/chip_depth"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/mode_pill"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        app:layout_constraintStart_toStartOf="@id/chip_camera"
+        app:layout_constraintTop_toBottomOf="@id/chip_camera">
+
+        <View
+            android:id="@+id/dot_depth"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/status_dot" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="7dp"
+            android:letterSpacing="0.06"
+            android:text="@string/camera_helios"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/depth_info"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            tools:text="8.0 fps · 10.121.136.136" />
+
+    </LinearLayout>
+
+    <!-- The flash controller: the dot is its link (yellow while lit), a tap reconnects. -->
+    <LinearLayout
+        android:id="@+id/chip_light"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/mode_pill"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <View
+            android:id="@+id/dot_light"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/status_dot" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="7dp"
+            android:letterSpacing="0.06"
+            android:text="@string/light_chip"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Transient status, over the lower part of the picture. -->
+    <TextView
+        android:id="@+id/message"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="24dp"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/mode_pill"
+        android:gravity="center"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/preview"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        tools:text="saved 4 files"
+        tools:visibility="visible" />
+
+    <!-- Both sources' settings at once: the dial only ever shows one of them. -->
+    <TextView
+        android:id="@+id/settings_line"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:gravity="center"
+        android:paddingVertical="6dp"
+        android:textColor="@color/camera_quiet"
+        android:textSize="11sp"
+        app:layout_constraintBottom_toTopOf="@id/exposure_row"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        tools:text="RGB 1/250 · 0 dB    NIR 1/5 · 18 dB" />
+
+    <!--
+        The shutter and gain readings of the selected source, and one dial for whichever
+        reading is lit. Tapping a reading hands the dial to it.
+    -->
+    <LinearLayout
+        android:id="@+id/exposure_row"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingBottom="4dp"
+        app:layout_constraintBottom_toTopOf="@id/mode_row"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingBottom="2dp">
+
+            <TextView
+                android:id="@+id/shutter_reading"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/mode_pill"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="monospace"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="6dp"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                tools:text="S 4.3 ms" />
+
+            <TextView
+                android:id="@+id/gain_reading"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/mode_pill"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="monospace"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="6dp"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                tools:text="G 0 dB" />
+
+            <!-- The flash current; shown once the controller is connected. -->
+            <TextView
+                android:id="@+id/level_reading"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/mode_pill"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="monospace"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="6dp"
+                android:textColor="@android:color/white"
+                android:textSize="12sp"
+                android:visibility="gone"
+                tools:text="L 300 mA"
+                tools:visibility="visible" />
+
+        </LinearLayout>
+
+        <com.cgjnkim.mobile_jai.ValueDial
+            android:id="@+id/exposure_dial"
+            android:layout_width="match_parent"
+            android:layout_height="62dp" />
+
+    </LinearLayout>
+
+    <!--
+        Which source the preview shows and the dial controls, and the modes the shutter
+        uses. It scrolls sideways rather than fitting, as in MobileOkad: the pills are as
+        wide as their words, and a row squeezed to the screen would wrap and move the
+        preview whenever one of them changes length.
+    -->
+    <HorizontalScrollView
+        android:id="@+id/mode_row"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:fillViewport="true"
+        android:paddingVertical="10dp"
+        android:scrollbars="none"
+        app:layout_constraintBottom_toTopOf="@id/shutter_bar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+    <LinearLayout
+        android:id="@+id/mode_pills"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp">
+
+        <!-- A bracket of four exposures merged into one radiance map, instead of one pair. -->
+        <TextView
+            android:id="@+id/toggle_hdr"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/hdr_label"
+            android:textColor="@color/camera_quiet"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!--
+            With HDR on: a second bracket at the same shutters with the lights off, for
+            comparison. Cycles which lights the lit half uses: NIR, phone torch, or both.
+        -->
+        <TextView
+            android:id="@+id/toggle_compare"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/compare_off"
+            android:textColor="@color/camera_quiet"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/toggle_flash"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/flash_off"
+            android:textAllCaps="true"
+            android:textColor="@color/camera_quiet"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/toggle_clip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/clip_off"
+            android:textAllCaps="true"
+            android:textColor="@color/camera_quiet"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/source_rgb"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:letterSpacing="0.08"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/source_rgb"
+            android:textColor="@color/camera_accent"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/source_nir"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:letterSpacing="0.08"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/source_nir"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- The Helios; tapped again while shown, it swaps depth and ToF intensity. -->
+        <TextView
+            android:id="@+id/source_depth"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/source_depth"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    </HorizontalScrollView>
+
+    <!-- Last capture, shutter. The shutter is centred on the screen, not on the row. -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/shutter_bar"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@color/camera_bar"
+        android:paddingVertical="16dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <ImageView
+            android:id="@+id/last_capture"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="28dp"
+            android:background="@drawable/round_button"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop"
+            app:layout_constraintBottom_toBottomOf="@id/shutter"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="@id/shutter" />
+
+        <View
+            android:id="@+id/shutter"
+            android:layout_width="76dp"
+            android:layout_height="76dp"
+            android:background="@drawable/shutter_button"
+            android:clickable="true"
+            android:contentDescription="@string/shutter"
+            android:enabled="false"
+            android:focusable="true"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <ProgressBar
+            android:id="@+id/shutter_progress"
+            style="?android:attr/progressBarStyleLarge"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:indeterminateDrawable="@drawable/shutter_progress"
+            android:indeterminateDuration="900"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="@id/shutter"
+            app:layout_constraintEnd_toEndOf="@id/shutter"
+            app:layout_constraintStart_toStartOf="@id/shutter"
+            app:layout_constraintTop_toTopOf="@id/shutter" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

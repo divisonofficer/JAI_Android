@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A sweeping ring on the shutter's rim.
+
+    Two things it has to avoid. The platform's own indeterminate drawable is a small
+    sliding block on this phone's skin, which tinted yellow looked like a stray square
+    rather than a camera busy indicator. And the ProgressBar is sized to the shutter
+    exactly, because a larger one grew the wrap_content bar it sits in and pushed the
+    preview up every time a capture started; the ring therefore rides the rim rather
+    than circling outside it.
+
+    ProgressBar drives a rotate drawable's level while indeterminate, which spins it.
+-->
+<rotate xmlns:android="http://schemas.android.com/apk/res/android"
+    android:fromDegrees="0"
+    android:pivotX="50%"
+    android:pivotY="50%"
+    android:toDegrees="360">
+
+    <shape
+        android:innerRadiusRatio="2.24"
+        android:shape="ring"
+        android:thicknessRatio="19"
+        android:useLevel="false">
+        <gradient
+            android:centerColor="#40FFD60A"
+            android:endColor="@color/camera_accent"
+            android:startColor="#00FFD60A"
+            android:type="sweep" />
+    </shape>
+
+</rotate>

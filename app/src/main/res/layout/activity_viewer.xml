@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:fitsSystemWindows="true"
+    tools:context=".ViewerActivity">
+
+    <TextView
+        android:id="@+id/back"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/round_button"
+        android:contentDescription="@string/back"
+        android:gravity="center"
+        android:text="@string/back_mark"
+        android:textColor="@android:color/white"
+        android:textSize="22sp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="12dp"
+        android:fontFamily="monospace"
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
+        app:layout_constraintBottom_toBottomOf="@id/back"
+        app:layout_constraintEnd_toStartOf="@id/toggle_partner"
+        app:layout_constraintStart_toEndOf="@id/back"
+        app:layout_constraintTop_toTopOf="@id/back"
+        tools:text="2026-09-30 12:10:05  ·  3/12" />
+
+    <!-- One half of a flash comparison: which half, and a tap to the other. -->
+    <TextView
+        android:id="@+id/toggle_partner"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:background="@drawable/mode_pill"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        android:text="@string/compare_lit"
+        android:textColor="@color/camera_accent"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/back"
+        app:layout_constraintEnd_toStartOf="@id/delete"
+        app:layout_constraintTop_toTopOf="@id/back"
+        tools:visibility="visible" />
+
+    <TextView
+        android:id="@+id/delete"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/mode_pill"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="7dp"
+        android:text="@string/delete"
+        android:textColor="@color/camera_warning"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="@id/back"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/back" />
+
+    <!--
+        Square like the capture. The stage clips; the pager inside does not, so the
+        neighbouring captures, laid a screen away on either side, are seen only as they
+        slide in under a swipe.
+    -->
+    <FrameLayout
+        android:id="@+id/stage"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:clipChildren="true"
+        app:layout_constraintDimensionRatio="1:1"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/back">
+
+        <com.cgjnkim.mobile_jai.CapturePager
+            android:id="@+id/pager"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false">
+
+            <ImageView
+                android:id="@+id/peek_prev"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@null"
+                android:scaleType="fitCenter"
+                android:visibility="invisible" />
+
+            <com.cgjnkim.mobile_jai.ZoomableImageView
+                android:id="@+id/image"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@string/preview_description" />
+
+            <ImageView
+                android:id="@+id/peek_next"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@null"
+                android:scaleType="fitCenter"
+                android:visibility="invisible" />
+
+        </com.cgjnkim.mobile_jai.CapturePager>
+
+    </FrameLayout>
+
+    <ProgressBar
+        android:id="@+id/loading"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:indeterminateTint="@color/camera_accent"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/stage"
+        app:layout_constraintEnd_toEndOf="@id/stage"
+        app:layout_constraintStart_toStartOf="@id/stage"
+        app:layout_constraintTop_toTopOf="@id/stage" />
+
+    <LinearLayout
+        android:id="@+id/mode_row"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingVertical="12dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/stage">
+
+        <TextView
+            android:id="@+id/source_rgb"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/mode_pill"
+            android:letterSpacing="0.08"
+            android:paddingHorizontal="18dp"
+            android:paddingVertical="7dp"
+            android:text="@string/source_rgb"
+            android:textColor="@color/camera_accent"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/source_nir"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/mode_pill"
+            android:letterSpacing="0.08"
+            android:paddingHorizontal="18dp"
+            android:paddingVertical="7dp"
+            android:text="@string/source_nir"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- The Helios's Z, when the capture has one. -->
+        <TextView
+            android:id="@+id/source_depth"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/mode_pill"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:paddingHorizontal="18dp"
+            android:paddingVertical="7dp"
+            android:text="@string/source_depth"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <!-- An HDR burst: the merge, or one of its brackets. Hidden for a single pair. -->
+        <TextView
+            android:id="@+id/toggle_frame"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:background="@drawable/mode_pill"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/viewer_hdr"
+            android:textColor="@color/camera_accent"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <!-- Display balance on or off: the file itself is always 1:1:1. -->
+        <TextView
+            android:id="@+id/toggle_wb"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:background="@drawable/mode_pill"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/wb_auto"
+            android:textColor="@color/camera_accent"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!--
+        An HDR merge seen one exposure at a time: TONE shows it tone-mapped, EV shows it
+        linear at a chosen exposure, where the dial walks down into the highlights and up
+        into the shadows the brackets recovered. Only while the merge itself is shown.
+    -->
+    <LinearLayout
+        android:id="@+id/ev_row"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/mode_row"
+        tools:visibility="visible">
+
+        <TextView
+            android:id="@+id/ev_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/mode_pill"
+            android:fontFamily="monospace"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="6dp"
+            android:text="@string/viewer_tone"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <com.cgjnkim.mobile_jai.ValueDial
+            android:id="@+id/ev_dial"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/info"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="20dp"
+        android:fontFamily="monospace"
+        android:lineSpacingExtra="4dp"
+        android:textColor="@color/camera_quiet"
+        android:textSize="11sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/ev_row"
+        tools:text="RGB  4.9 ms · 0 dB · BayerRG12Packed\nNIR  396.9 ms · 0 dB · Mono12Packed" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
