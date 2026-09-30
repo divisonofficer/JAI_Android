@@ -14,9 +14,15 @@ import kotlin.math.min
  *
  *     E = sum_j w(z_j) * (z_j - black) / t_j  /  sum_j w(z_j)
  *
- * The weight is Debevec's hat, restricted to the valid range: zero at or below the noise
+ * The weight is Debevec's hat, restricted to the valid range -- zero at or below the noise
  * floor just above black, zero at or above [clipLevel] where the sample has saturated,
- * rising linearly to the middle in between. Only samples that measured something count.
+ * rising linearly to the middle in between -- times the frame's exposure time. The hat
+ * alone was made for 8-bit JPEGs, where every frame is equally noisy; on raw data a short
+ * frame's estimate is its counts scaled up by up to 64x, and its read noise, residual
+ * black error and any unmapped hot pixel with it. Weighting by exposure (Robertson et al.,
+ * and what raw HDR tools do) lets the longest unclipped frame dominate wherever it is
+ * valid, and the short ones speak only where the long ones have clipped. Without it the
+ * merge showed bright dots across dark areas that the longest bracket rendered clean.
  *
  * Every sample is merged on its own, so a Bayer mosaic stays a mosaic: each site is
  * combined only with the same site in the other frames, and the result is still RGGB.
@@ -27,8 +33,13 @@ import kotlin.math.min
  */
 object HdrMerge {
 
-    /** 12-bit black level at the camera's default BlackLevel. */
-    const val BLACK = 95f
+    /**
+     * 12-bit black level at the camera's default BlackLevel. Fitted from bracket pairs of
+     * both sensors, as the level that makes consecutive brackets differ by their exposure
+     * ratio (99.0 RGB and NIR); dark frames peak at 100-101. An earlier guess of 95 left
+     * each short frame 4 counts bright, which a 64x scale-up turned into 250.
+     */
+    const val BLACK = 99f
 
     /** At or above this a 12-bit sample has, or may have, saturated. */
     const val CLIP = 3900f
@@ -57,6 +68,8 @@ object HdrMerge {
         // Shortest first, so the fallbacks below can pick ends by index.
         val order = exposuresUs.indices.sortedBy { exposuresUs[it] }
         val scale = FloatArray(frames.size) { (referenceUs / exposuresUs[it]).toFloat() }
+        val longestUs = exposuresUs.max()
+        val trust = FloatArray(frames.size) { (exposuresUs[it] / longestUs).toFloat() }
         val low = black + noiseFloor
         val mid = (low + clipLevel) / 2f
         val shortest = order.first()
@@ -68,8 +81,9 @@ object HdrMerge {
             var weights = 0f
             for (j in frames.indices) {
                 val z = (frames[j][i].toInt() and 0xFFFF).toFloat()
-                val w = if (z <= mid) z - low else clipLevel - z
-                if (w <= 0f) continue
+                val hat = if (z <= mid) z - low else clipLevel - z
+                if (hat <= 0f) continue
+                val w = hat * trust[j]
                 sum += w * (z - black) * scale[j]
                 weights += w
             }

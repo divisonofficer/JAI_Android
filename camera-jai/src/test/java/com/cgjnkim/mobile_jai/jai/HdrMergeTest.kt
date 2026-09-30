@@ -61,3 +61,22 @@ class HdrMergeTest {
         assertEquals(2_000_000.0, clamped[3], 0.0)
     }
 }
+
+class HdrMergeNoiseTest {
+
+    @Test
+    fun `a short frame's offset does not leak where the long one is valid`() {
+        // A dark pixel: 300 counts in the 64x longer frame, and in the short ones a
+        // 12-count offset (an unmapped hot pixel, or black-level error) on top of almost
+        // nothing. Scaled up 64x that offset is 768 counts; it must not show.
+        val black = HdrMerge.BLACK
+        val exposures = doubleArrayOf(125.0, 1000.0, 8000.0, 64000.0)
+        val trueCountsPerUs = 300.0 / 64000.0
+        val frames = exposures.map { t ->
+            val offset = if (t < 64000.0) 12 + 20 else 0 // above the noise floor, so the hat alone would count it
+            ShortArray(1) { (black + trueCountsPerUs * t + offset).toInt().toShort() }
+        }
+        val out = HdrMerge.merge(frames, exposures, referenceUs = 64000.0)
+        org.junit.Assert.assertEquals(300f, out[0], 300f * 0.15f)
+    }
+}

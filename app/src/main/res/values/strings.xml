@@ -59,4 +59,6 @@
     <string name="compare_ambient">AMBIENT</string>
     <string name="status_saved_compare">compare saved: %1$d files</string>
     <string name="compare_no_torch">no phone torch on this device</string>
+    <string name="compare_active">ACTIVE</string>
+    <string name="compare_active_share_fmt">ACTIVE = LIT − AMBIENT · lights supply %1$.0f%% of the lit light</string>
 </resources>

@@ -15,8 +15,8 @@ import kotlin.math.pow
  */
 object RawDisplay {
 
-    /** Sensor black level at the default BlackLevel, in 12-bit counts. */
-    const val BLACK_LEVEL = 95f
+    /** Sensor black level at the default BlackLevel, in 12-bit counts (see [HdrMerge.BLACK]). */
+    const val BLACK_LEVEL = HdrMerge.BLACK
     const val FULL_SCALE = 4095f
 
     /** Samples at or above this are treated as clipped and left out of the balance. */

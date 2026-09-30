@@ -86,7 +86,7 @@ object PreviewRenderer {
     private fun lut(bits: Int): IntArray = synchronized(luts) {
         luts.getOrPut(bits) {
             val full = (1 shl bits) - 1
-            // 95 of 4095 on this camera at its default BlackLevel, scaled to the depth.
+            // 99 of 4095 on this camera at its default BlackLevel, scaled to the depth.
             val black = BLACK_LEVEL_12 * full / 4095.0
             IntArray(full + 1) { v ->
                 val x = ((v - black) / (full - black)).coerceIn(0.0, 1.0)
@@ -95,7 +95,7 @@ object PreviewRenderer {
         }
     }
 
-    private const val BLACK_LEVEL_12 = 95.0
+    private const val BLACK_LEVEL_12 = HdrMerge.BLACK.toDouble()
     private const val DISPLAY_GAMMA = 2.2
     const val CLIP_COLOR = 0xFFFF3B30.toInt()
 }

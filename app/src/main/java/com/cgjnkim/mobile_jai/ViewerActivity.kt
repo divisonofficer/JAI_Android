@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.cgjnkim.mobile_jai.databinding.ActivityViewerBinding
 import com.cgjnkim.mobile_jai.helios.DepthRenderer
+import com.cgjnkim.mobile_jai.jai.HdrMerge
 import com.cgjnkim.mobile_jai.jai.RawDisplay
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -52,6 +53,12 @@ class ViewerActivity : AppCompatActivity() {
      */
     private var evMilli: Long? = null
 
+    /**
+     * Showing the light a flash comparison's lights added: LIT - AMBIENT of the two HDR
+     * merges. Only ever on the lit half, which is where the cycle lands it.
+     */
+    private var active = false
+
     /** What the current capture decoded to, so switching views does not read the files again. */
     private class Loaded(
         val stamp: String,
@@ -70,6 +77,9 @@ class ViewerActivity : AppCompatActivity() {
 
         /** Brackets are read when first looked at, and kept for flipping back and forth. */
         val bracketCache = HashMap<String, TiffReader.Raw>()
+
+        /** For the lit half of a flash comparison: LIT - AMBIENT per source, once computed. */
+        val activeCache = HashMap<Source, FloatArray>()
     }
 
     @Volatile private var loaded: Loaded? = null
@@ -98,7 +108,7 @@ class ViewerActivity : AppCompatActivity() {
         binding.toggleWb.setOnClickListener { changeView(source, !balance) }
         binding.toggleFrame.setOnClickListener { cycleFrame() }
         binding.evMode.setOnClickListener { toggleEv() }
-        binding.togglePartner.setOnClickListener { showPartner() }
+        binding.togglePartner.setOnClickListener { cycleCompare() }
         binding.evDial.geometric = false
         binding.evDial.setStops(evStops(), 0)
         binding.evDial.onValuePicked = { stop -> evMilli = stop.value; showModes(); render(quickFirst = true, keepZoom = true); loadPeeks() }
@@ -127,7 +137,7 @@ class ViewerActivity : AppCompatActivity() {
 
     /** The view settings a picture was rendered under; a peek from other settings is stale. */
     private fun viewKey(src: Source = source, wb: Boolean = balance) =
-        "$src/${if (src == Source.RGB) wb else false}/${evMilli ?: "tone"}"
+        "$src/${if (src == Source.RGB) wb else false}/${evMilli ?: "tone"}${if (active) "/active" else ""}"
 
     // ---- current capture ------------------------------------------------------------
 
@@ -149,7 +159,10 @@ class ViewerActivity : AppCompatActivity() {
         binding.info.text = ""
         binding.loading.visibility = View.VISIBLE
         shown = null
-        if (!keepView) frame = HDR_FRAME
+        if (!keepView) {
+            frame = HDR_FRAME
+            active = false
+        }
         // Swiped onto a capture taken without the Helios: fall back to what it does have.
         if (source == Source.DEPTH && entry.depthTiffs.isEmpty()) source = Source.RGB
         showModes()
@@ -183,14 +196,48 @@ class ViewerActivity : AppCompatActivity() {
         val metadata = CaptureLibrary.metadata(this, entry)
         val serial = DefectRepair.serialOf(metadata)
         val hdr = HashMap<Source, TiffReader.FloatRaw>()
+        val bracketsRead = HashMap<String, TiffReader.Raw>()
         for (s in Source.values()) {
+            val remerged = runCatching { remerge(entry, metadata, s, serial, bracketsRead) }
+                .onFailure { android.util.Log.w("Viewer", "remerge ${entry.stamp} $s", it) }.getOrNull()
+            if (remerged != null) { hdr[s] = remerged; continue }
             val uri = entry.hdrTiffs[s.name.lowercase()] ?: continue
             runCatching { CaptureLibrary.readFloatTiff(this, uri) }.getOrNull()?.let { mend(serial, s, it); hdr[s] = it }
         }
         val gains = hdr[Source.RGB]?.let { RawDisplay.grayWorldGains(it.samples, it.width, it.height) } ?: RawDisplay.Gains.UNITY
         val brackets = Source.values().mapNotNull { s -> entry.bracketTiffs[s.name.lowercase()]?.let { s to it } }.toMap()
         val depth = entry.depthTiffs["z"]?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
-        return Loaded(entry.stamp, null, null, gains, metadata, hdr, brackets, depth)
+        return Loaded(entry.stamp, null, null, gains, metadata, hdr, brackets, depth).also {
+            it.bracketCache.putAll(bracketsRead)
+        }
+    }
+
+    /**
+     * The merge made again from the brackets, with the merge as it is now rather than as it
+     * was when the burst was saved. The brackets are the data and the HDR TIFF is derived,
+     * so a correction to the merge -- the black level, the weighting -- reaches every burst
+     * already on the phone the next time it is opened. Null when a bracket or its exposure
+     * is missing; the saved TIFF is used then.
+     */
+    private fun remerge(
+        entry: CaptureEntry,
+        metadata: JSONObject?,
+        src: Source,
+        serial: String?,
+        read: MutableMap<String, TiffReader.Raw>,
+    ): TiffReader.FloatRaw? {
+        val label = src.name.lowercase()
+        val uris = entry.bracketTiffs[label] ?: return null
+        val list = metadata?.optJSONArray("brackets") ?: return null
+        if (uris.size != list.length() || uris.isEmpty()) return null
+        val exposures = DoubleArray(uris.size) { list.getJSONObject(it).optJSONObject(label)?.optDouble("exposure_us") ?: Double.NaN }
+        if (exposures.any { !it.isFinite() || it <= 0 }) return null
+        val anchor = (metadata.optJSONObject("hdr")?.optInt("anchor_index") ?: 0).coerceIn(0, uris.lastIndex)
+        val raws = uris.mapIndexed { k, uri ->
+            CaptureLibrary.readTiff(this, uri).also { mend(serial, src, it); read["$src/$k"] = it }
+        }
+        val merged = HdrMerge.merge(raws.map { it.samples }, exposures, referenceUs = exposures[anchor])
+        return TiffReader.FloatRaw(merged, raws[0].width, raws[0].height, "remerged from ${raws.size} brackets")
     }
 
     /**
@@ -221,10 +268,69 @@ class ViewerActivity : AppCompatActivity() {
         return entries.indexOfFirst { it.stamp == partner }.takeIf { it >= 0 }
     }
 
-    private fun showPartner() {
-        val i = partnerIndex() ?: return
-        peeks.clear()
-        show(i, null, keepView = true)
+    private fun role(): String? = loaded?.takeIf { it.stamp == entries.getOrNull(index)?.stamp }
+        ?.metadata?.optJSONObject("compare")?.optString("role")?.takeIf { it.isNotEmpty() }
+
+    /**
+     * LIT, then AMBIENT, then ACTIVE (the difference, shown on the lit half), then LIT
+     * again -- each keeping source, exposure and zoom, so one spot can be watched through
+     * all three.
+     */
+    private fun cycleCompare() {
+        val partner = partnerIndex() ?: return
+        when {
+            active -> {
+                active = false
+                showModes()
+                render(quickFirst = false)
+            }
+            role() == "lit" -> {
+                peeks.clear()
+                show(partner, null, keepView = true)
+            }
+            else -> {
+                // From AMBIENT back to the lit half, showing what its lights added.
+                active = true
+                frame = HDR_FRAME
+                peeks.clear()
+                show(partner, null, keepView = true)
+            }
+        }
+    }
+
+    /**
+     * LIT - AMBIENT for [src]. Both merges are in counts at their reference exposure, and a
+     * comparison uses one bracket for both halves, so the references match; they are still
+     * read from the metadata and scaled, so the difference stays right if they ever do not.
+     * Motion between the two bursts shows as negative values, which display as black.
+     */
+    private fun activeMap(data: Loaded, src: Source): FloatArray? = synchronized(data.activeCache) {
+        data.activeCache[src]?.let { return it }
+        val lit = data.hdr[src] ?: return null
+        val partner = partnerIndex()?.let { entries[it] } ?: return null
+        val ambientData = loadHdr(partner)
+        val ambient = ambientData.hdr[src] ?: return null
+        if (ambient.samples.size != lit.samples.size) return null
+        val key = "${src.name.lowercase()}_reference_us"
+        val refLit = data.metadata?.optJSONObject("hdr")?.optDouble(key) ?: Double.NaN
+        val refAmbient = ambientData.metadata?.optJSONObject("hdr")?.optDouble(key) ?: Double.NaN
+        val k = if (refLit.isFinite() && refAmbient.isFinite() && refAmbient > 0) (refLit / refAmbient).toFloat() else 1f
+        val diff = FloatArray(lit.samples.size) { lit.samples[it] - ambient.samples[it] * k }
+        data.activeCache[src] = diff
+        diff
+    }
+
+    /** How much of the lit half's light its lights supplied, from the active map. */
+    private fun activeShare(data: Loaded, src: Source): Float? {
+        val diff = synchronized(data.activeCache) { data.activeCache[src] } ?: return null
+        val lit = data.hdr[src]?.samples ?: return null
+        var added = 0.0
+        var total = 0.0
+        for (i in diff.indices step 7) {
+            added += diff[i].coerceAtLeast(0f)
+            total += lit[i].coerceAtLeast(0f)
+        }
+        return if (total > 0) (added / total).toFloat() else null
     }
 
     /** Tone-mapped, or linear at the exposure the dial last held. */
@@ -296,7 +402,9 @@ class ViewerActivity : AppCompatActivity() {
                     binding.image.setUpgradedBitmap(full)
                     // Only the canonical view -- the merge, for a burst -- is worth keeping
                     // as a neighbour's peek: that is what a swipe back expects to see.
-                    shown = if (shownFrame == HDR_FRAME) Peek(data.stamp, key, full) else null
+                    shown = if (shownFrame == HDR_FRAME && !active) Peek(data.stamp, key, full) else null
+                    binding.info.text = describe(data) +
+                        (if (active) activeShare(data, src)?.let { "\n" + getString(R.string.compare_active_share_fmt, it * 100) } ?: "" else "")
                 }
             }
         }
@@ -306,6 +414,14 @@ class ViewerActivity : AppCompatActivity() {
     private fun drawView(data: Loaded, src: Source, wb: Boolean, frame: Int, step: Int): Bitmap? {
         if (src == Source.DEPTH) return drawDepth(data.depth, data.metadata)
         if (!data.isHdr) return draw(if (src == Source.RGB) data.rgb else data.nir, src, wb, data.gains, step)
+        if (active) {
+            val diff = activeMap(data, src) ?: return null
+            val side = data.hdr[src]?.width ?: return null
+            val raw = TiffReader.FloatRaw(diff, side, diff.size / side, null)
+            // Balanced on the added light itself: its colour is the lights', not the room's.
+            val gains = if (src == Source.RGB && wb) RawDisplay.grayWorldGains(diff, raw.width, raw.height) else RawDisplay.Gains.UNITY
+            return drawHdr(raw, src, gains, step, evMilli)
+        }
         if (frame == HDR_FRAME) return drawHdr(data.hdr[src], src, if (wb) data.gains else RawDisplay.Gains.UNITY, step, evMilli)
         val uri = data.brackets[src]?.getOrNull(frame) ?: return null
         val raw = synchronized(data.bracketCache) {
@@ -468,8 +584,22 @@ class ViewerActivity : AppCompatActivity() {
         val role = loaded?.takeIf { it.stamp == entries.getOrNull(index)?.stamp }
             ?.metadata?.optJSONObject("compare")?.optString("role")
         binding.togglePartner.visibility = if (role != null && partnerIndex() != null) View.VISIBLE else View.GONE
-        binding.togglePartner.setText(if (role == "ambient") R.string.compare_ambient else R.string.compare_lit)
-        binding.togglePartner.setTextColor(if (role == "ambient") white else accent)
+        binding.togglePartner.setText(
+            when {
+                active -> R.string.compare_active
+                role == "ambient" -> R.string.compare_ambient
+                else -> R.string.compare_lit
+            }
+        )
+        binding.togglePartner.setTextColor(
+            when {
+                active -> ContextCompat.getColor(this, R.color.camera_ok)
+                role == "ambient" -> white
+                else -> accent
+            }
+        )
+        // The difference is of the merges; a single bracket has no partner to subtract.
+        if (active) binding.toggleFrame.visibility = View.GONE
     }
 
     private fun describe(data: Loaded): String {
