@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.cgjnkim.mobile_jai.databinding.ActivityViewerBinding
 import com.cgjnkim.mobile_jai.helios.DepthRenderer
+import com.cgjnkim.mobile_jai.jai.DefectFix
 import com.cgjnkim.mobile_jai.jai.HdrMerge
 import com.cgjnkim.mobile_jai.jai.RawDisplay
 import org.json.JSONObject
@@ -80,6 +81,15 @@ class ViewerActivity : AppCompatActivity() {
 
         /** For the lit half of a flash comparison: LIT - AMBIENT per source, once computed. */
         val activeCache = HashMap<Source, FloatArray>()
+
+        /** For a flash comparison: the other half, loaded alongside and mended with it. */
+        var partner: Loaded? = null
+
+        /**
+         * Defects found by comparing the two halves (see [DefectFix.commonOutliers]), per
+         * source, applied to both merges and to every bracket shown from either.
+         */
+        val pairMask = HashMap<Source, IntArray>()
     }
 
     @Volatile private var loaded: Loaded? = null
@@ -114,7 +124,7 @@ class ViewerActivity : AppCompatActivity() {
         binding.evDial.onValuePicked = { stop -> evMilli = stop.value; showModes(); render(quickFirst = true, keepZoom = true); loadPeeks() }
 
         binding.pager.bind(binding.peekPrev, binding.image, binding.peekNext)
-        binding.pager.canMove = { direction -> index + direction in entries.indices }
+        binding.pager.canMove = { direction -> neighbor(direction) != null }
         binding.pager.onSettled = ::commit
         showModes()
 
@@ -154,7 +164,9 @@ class ViewerActivity : AppCompatActivity() {
         if (i !in entries.indices) return
         index = i
         val entry = entries[i]
-        binding.title.text = "%s  ·  %d/%d".format(CaptureLibrary.label(entry.stamp), i + 1, entries.size)
+        val scenes = entries.indices.filterNot(::folded)
+        val position = scenes.indexOf(sceneIndex(i)) + 1
+        binding.title.text = "%s  ·  %d/%d".format(CaptureLibrary.label(entry.stamp), position, scenes.size)
         if (!keepView) binding.image.setImageBitmap(placeholder ?: Thumbnails.cached(entry.stamp))
         binding.info.text = ""
         binding.loading.visibility = View.VISIBLE
@@ -192,7 +204,11 @@ class ViewerActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadHdr(entry: CaptureEntry): Loaded {
+    /**
+     * @param withPartner for one half of a flash comparison, also load the other half and
+     *   mend in both what the pair shows to be the sensor's
+     */
+    private fun loadHdr(entry: CaptureEntry, withPartner: Boolean = true): Loaded {
         val metadata = CaptureLibrary.metadata(this, entry)
         val serial = DefectRepair.serialOf(metadata)
         val hdr = HashMap<Source, TiffReader.FloatRaw>()
@@ -207,8 +223,42 @@ class ViewerActivity : AppCompatActivity() {
         val gains = hdr[Source.RGB]?.let { RawDisplay.grayWorldGains(it.samples, it.width, it.height) } ?: RawDisplay.Gains.UNITY
         val brackets = Source.values().mapNotNull { s -> entry.bracketTiffs[s.name.lowercase()]?.let { s to it } }.toMap()
         val depth = entry.depthTiffs["z"]?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
-        return Loaded(entry.stamp, null, null, gains, metadata, hdr, brackets, depth).also {
+        val loaded = Loaded(entry.stamp, null, null, gains, metadata, hdr, brackets, depth).also {
             it.bracketCache.putAll(bracketsRead)
+        }
+        if (withPartner) entry.partnerStamp?.let { stamp ->
+            entries.firstOrNull { it.stamp == stamp }?.let { mendPair(loaded, loadHdr(it, withPartner = false)) }
+        }
+        return loaded
+    }
+
+    /**
+     * A flash comparison is two pictures of one scene under different light, which is what
+     * it takes to tell the sensor from the scene: whatever stands out by the same amount in
+     * both halves is a defect, and it is exactly what disappears from LIT - AMBIENT. Those
+     * pixels are mended in both merges and in their brackets; the fixed map has already
+     * taken care of the ones known in advance.
+     */
+    private fun mendPair(lit: Loaded, other: Loaded) {
+        lit.partner = other
+        other.partner = lit
+        for (s in listOf(Source.RGB, Source.NIR)) {
+            val a = lit.hdr[s] ?: continue
+            val b = other.hdr[s] ?: continue
+            if (a.samples.size != b.samples.size) continue
+            val bayer = s == Source.RGB
+            val mask = DefectFix.commonOutliers(a.samples, b.samples, a.width, a.height, bayer)
+            if (mask.isEmpty()) continue
+            for (d in listOf(lit, other)) {
+                d.pairMask[s] = mask
+                d.hdr[s]?.let { DefectFix.correct(it.samples, it.width, it.height, mask, bayer) }
+                synchronized(d.bracketCache) {
+                    for ((key, raw) in d.bracketCache) {
+                        if (key.startsWith("$s/")) DefectFix.correct(raw.samples, raw.width, raw.height, mask, bayer)
+                    }
+                }
+            }
+            android.util.Log.i("Viewer", "${lit.stamp} $s: ${mask.size} pixels mended from the pair")
         }
     }
 
@@ -307,8 +357,7 @@ class ViewerActivity : AppCompatActivity() {
     private fun activeMap(data: Loaded, src: Source): FloatArray? = synchronized(data.activeCache) {
         data.activeCache[src]?.let { return it }
         val lit = data.hdr[src] ?: return null
-        val partner = partnerIndex()?.let { entries[it] } ?: return null
-        val ambientData = loadHdr(partner)
+        val ambientData = data.partner ?: (partnerIndex()?.let { entries[it] } ?: return null).let { loadHdr(it, withPartner = false) }
         val ambient = ambientData.hdr[src] ?: return null
         if (ambient.samples.size != lit.samples.size) return null
         val key = "${src.name.lowercase()}_reference_us"
@@ -426,7 +475,10 @@ class ViewerActivity : AppCompatActivity() {
         val uri = data.brackets[src]?.getOrNull(frame) ?: return null
         val raw = synchronized(data.bracketCache) {
             data.bracketCache.getOrPut("$src/$frame") {
-                CaptureLibrary.readTiff(this, uri).also { mend(DefectRepair.serialOf(data.metadata), src, it) }
+                CaptureLibrary.readTiff(this, uri).also { raw ->
+                    mend(DefectRepair.serialOf(data.metadata), src, raw)
+                    data.pairMask[src]?.let { DefectFix.correct(raw.samples, raw.width, raw.height, it, src == Source.RGB) }
+                }
             }
         }
         val gains = if (src == Source.RGB && wb) RawDisplay.grayWorldGains(raw.samples, raw.width, raw.height) else RawDisplay.Gains.UNITY
@@ -492,7 +544,7 @@ class ViewerActivity : AppCompatActivity() {
         val src = source
         val wb = balance
         for (direction in intArrayOf(-1, 1)) {
-            val entry = entries.getOrNull(index + direction)
+            val entry = neighbor(direction)?.let { entries[it] }
             if (entry == null) {
                 peeks.remove(direction)
                 peekView(direction).setImageDrawable(null)
@@ -509,7 +561,7 @@ class ViewerActivity : AppCompatActivity() {
                 val bitmap = (if (entry.isHdr) peekHdr(entry, src, wb) else peekSingle(entry, src, wb)) ?: return@execute
                 main.post {
                     // Only if that side still shows that capture under these settings.
-                    if (entries.getOrNull(index + direction)?.stamp == entry.stamp && viewKey() == key) {
+                    if (neighbor(direction)?.let { entries[it].stamp } == entry.stamp && viewKey() == key) {
                         peeks[direction] = Peek(entry.stamp, key, bitmap)
                         peekView(direction).setImageBitmap(bitmap)
                     }
@@ -547,11 +599,49 @@ class ViewerActivity : AppCompatActivity() {
      * on the side it went to.
      */
     private fun commit(direction: Int) {
-        val landing = peeks[direction]?.takeIf { it.stamp == entries.getOrNull(index + direction)?.stamp }
-        val leaving = shown
+        val target = neighbor(direction) ?: return
+        val landing = peeks[direction]?.takeIf { it.stamp == entries[target].stamp }
+        // Only a picture of the scene's own face -- not an AMBIENT or ACTIVE view of it --
+        // is what a swipe back expects to land on.
+        val leaving = shown?.takeIf { !active && !folded(index) }
         peeks.clear()
         if (leaving != null && leaving.key == viewKey()) peeks[-direction] = leaving
-        show(index + direction, landing?.bitmap)
+        show(target, landing?.bitmap)
+    }
+
+    // ---- scenes ---------------------------------------------------------------------
+
+    /**
+     * A flash comparison is one scene: its ambient half is folded into its lit half, so
+     * paging steps over it and it is reached only through the LIT/AMBIENT/ACTIVE pill.
+     */
+    private fun folded(i: Int): Boolean {
+        val e = entries.getOrNull(i) ?: return false
+        return e.compareRole == "ambient" && entries.any { it.stamp == e.partnerStamp }
+    }
+
+    /** Where capture [i] stands for paging: an ambient half stands at its lit half. */
+    private fun sceneIndex(i: Int): Int {
+        if (!folded(i)) return i
+        val partner = entries[i].partnerStamp
+        return entries.indexOfFirst { it.stamp == partner }.takeIf { it >= 0 } ?: i
+    }
+
+    /** The next scene in [direction] from the one on screen, or null at the end. */
+    private fun neighbor(direction: Int): Int? {
+        var i = sceneIndex(index) + direction
+        while (i in entries.indices) {
+            if (!folded(i)) return i
+            i += direction
+        }
+        return null
+    }
+
+    /** The capture on screen and, for a comparison, its other half. */
+    private fun sceneMembers(): List<CaptureEntry> {
+        val entry = entries.getOrNull(index) ?: return emptyList()
+        val partner = entry.partnerStamp?.let { p -> entries.firstOrNull { it.stamp == p } }
+        return listOfNotNull(entry, partner)
     }
 
     // ---- chrome ---------------------------------------------------------------------
@@ -628,10 +718,11 @@ class ViewerActivity : AppCompatActivity() {
 
     private fun describeDepth(m: JSONObject): String? {
         val d = m.optJSONObject("depth") ?: return null
-        return "DEPTH  %s · %s · %+.1f ms from the pair".format(
+        // delay_ms since the ToF went dark during JAI exposures; skew_ms before that.
+        return "DEPTH  %s · %s · %+.0f ms after the pair".format(
             d.optString("operating_mode").removePrefix("Distance"),
             d.optString("exposure_time").removePrefix("Exp"),
-            d.optDouble("skew_ms"),
+            d.optDouble("delay_ms", d.optDouble("skew_ms")),
         )
     }
 
@@ -661,35 +752,39 @@ class ViewerActivity : AppCompatActivity() {
      * Deletes, then leaves the way a swipe would: the next capture slides in (or the
      * previous one at the end of the list), rather than cutting to it.
      */
+    /** Deletes the whole scene: for a flash comparison, both halves. */
     private fun confirmDelete() {
-        val entry = entries.getOrNull(index) ?: return
+        val members = sceneMembers()
+        val entry = members.firstOrNull() ?: return
         AlertDialog.Builder(this)
             .setTitle(R.string.delete_title)
-            .setMessage(getString(R.string.delete_message, CaptureLibrary.label(entry.stamp), entry.uris.size))
+            .setMessage(getString(R.string.delete_message, CaptureLibrary.label(entry.stamp), members.sumOf { it.uris.size }))
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.delete) { _, _ ->
                 worker.execute {
-                    CaptureLibrary.delete(this, entry)
-                    Thumbnails.forget(entry.stamp)
-                    main.post { afterDelete(entry) }
+                    for (m in members) {
+                        CaptureLibrary.delete(this, m)
+                        Thumbnails.forget(m.stamp)
+                    }
+                    main.post { afterDelete(members.mapTo(HashSet()) { it.stamp }) }
                 }
             }
             .show()
     }
 
-    private fun afterDelete(entry: CaptureEntry) {
-        val direction = if (index + 1 in entries.indices) 1 else -1
-        val remaining = entries.filterNot { it.stamp == entry.stamp }
-        if (remaining.isEmpty()) {
+    private fun afterDelete(removed: Set<String>) {
+        val direction = if (neighbor(1) != null) 1 else -1
+        val target = neighbor(direction)?.let { entries[it].stamp }
+        val remaining = entries.filterNot { it.stamp in removed }
+        if (target == null || remaining.isEmpty()) {
             finish()
             return
         }
         val landing = peeks[direction]
-        val landAt = if (direction > 0) index else index - 1
         val adopt = {
             entries = remaining
             peeks.clear()
-            show(landAt, landing?.bitmap)
+            show(remaining.indexOfFirst { it.stamp == target }, landing?.bitmap)
         }
         if (landing != null) binding.pager.slide(direction) { adopt() } else adopt()
     }

@@ -41,7 +41,8 @@ class GalleryActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         loader.execute {
-            val list = CaptureLibrary.list(this)
+            // One cell per scene: a flash comparison's two bursts show as their lit half.
+            val list = CaptureLibrary.scenes(CaptureLibrary.list(this))
             main.post {
                 entries = list
                 adapter.notifyDataSetChanged()
@@ -71,6 +72,7 @@ class GalleryActivity : AppCompatActivity() {
             holder.stamp = entry.stamp
             holder.cell.time.text = CaptureLibrary.label(entry.stamp).substring(5, 16)
             holder.cell.badgeHdr.visibility = if (entry.isHdr) View.VISIBLE else View.GONE
+            holder.cell.badgeHdr.setText(if (entry.compareRole != null) R.string.gallery_compare_badge else R.string.viewer_hdr)
             holder.cell.root.setOnClickListener {
                 startActivity(Intent(this@GalleryActivity, ViewerActivity::class.java).putExtra(ViewerActivity.EXTRA_STAMP, entry.stamp))
             }

@@ -42,9 +42,10 @@ import kotlin.math.roundToLong
  * switch inside a capture, open and close. Encoding and writing files go through
  * [saver], so the next shot can be taken while the last is still being written.
  *
- * The Lucid Helios depth camera runs beside the JAI on its own [heliosWorker]: the
- * preview can show it instead of RGB or NIR, and every capture takes the depth frame
- * nearest the JAI pair in time (see [HeliosCamera]).
+ * The Lucid Helios depth camera runs beside the JAI on its own [heliosWorker]. Its ToF
+ * illuminator is near-infrared and shows up in the JAI's NIR frames, so it acquires only
+ * while the preview shows it; a capture takes the JAI's frames with the Helios dark and
+ * then one depth frame (see [HeliosCamera.grab]).
  */
 class MainActivity : AppCompatActivity() {
 
@@ -96,7 +97,7 @@ class MainActivity : AppCompatActivity() {
     private var nextLightAt = 0L
 
     /** The preview shows the Helios rather than [source]; [source] stays what the JAI dials control. */
-    private var showDepth = false
+    @Volatile private var showDepth = false
     private var depthView = DepthRenderer.View.DEPTH
     @Volatile private var heliosConnecting = false
     private var nextHeliosAt = 0L
@@ -178,7 +179,7 @@ class MainActivity : AppCompatActivity() {
     /** The newest capture on disk, for the gallery button: it may have been deleted there. */
     private fun loadLastThumbnail() {
         saver.execute {
-            val bitmap = CaptureLibrary.list(this).firstOrNull()?.let { Thumbnails.load(this, it) }
+            val bitmap = CaptureLibrary.scenes(CaptureLibrary.list(this)).firstOrNull()?.let { Thumbnails.load(this, it) }
             main.post { binding.lastCapture.setImageBitmap(bitmap) }
         }
     }
@@ -281,7 +282,8 @@ class MainActivity : AppCompatActivity() {
         heliosConnecting = true
         showDepthStatus()
         heliosWorker.execute {
-            val ok = helios.open()
+            // Dark unless the depth preview is up: see the class comment.
+            val ok = helios.open(stream = showDepth)
             if (ok) {
                 // The user's last mode and exposure, when this model still offers them. One
                 // that fails is forgotten: a mode can restart the camera, and restoring it
@@ -344,6 +346,9 @@ class MainActivity : AppCompatActivity() {
         showDepth = true
         lastDepth = null
         frameTimes.clear()
+        if (helios.isOpen) heliosWorker.execute {
+            runCatching { helios.startStreaming() }.onFailure { Log.w(TAG, "depth preview", it) }
+        }
         if (dial != Dial.LEVEL) dial = Dial.SHUTTER
         showModes()
         showDial()
@@ -449,6 +454,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectSource(s: Source) {
         source = s
+        // The ToF light would show in the NIR preview; nothing needs it now.
+        if (showDepth && helios.isOpen) heliosWorker.execute { runCatching { helios.stopStreaming() } }
         showDepth = false
         lastRendered = null
         frameTimes.clear()
@@ -658,6 +665,22 @@ class MainActivity : AppCompatActivity() {
 
     // ---- capture ------------------------------------------------------------------
 
+    /** The ToF light off before the JAI exposes: on [worker], ahead of any JAI capture. */
+    private fun darkenDepth() {
+        if (helios.isStreaming) runCatching { helios.stopStreaming() }.onFailure { Log.w(TAG, "depth off", it) }
+    }
+
+    /** One depth frame once the JAI's are all in; lit only for it. On [worker]. */
+    private fun grabDepth(afterHostNs: Long): Result<HeliosCamera.Capture>? =
+        if (helios.isOpen) helios.grab(afterHostNs) else null
+
+    /** Back to streaming after a capture, if the depth preview is what is showing. */
+    private fun resumeDepthPreview() {
+        if (showDepth && helios.isOpen) heliosWorker.execute {
+            runCatching { helios.startStreaming() }.onFailure { Log.w(TAG, "depth preview", it) }
+        }
+    }
+
     private fun capture() {
         if (capturing || pendingSaves >= MAX_PENDING_SAVES || !camera.isOpen) return
         if (hdr) return if (compare != Compare.OFF) captureCompare() else captureHdr()
@@ -673,11 +696,13 @@ class MainActivity : AppCompatActivity() {
             // Every frame exposed after the switch is then lit, and capture() takes only those.
             val lit = flash != Flash.OFF && runCatching { light.setOn(); true }
                 .onFailure { Log.w(TAG, "flash on", it) }.getOrDefault(false)
+            darkenDepth()
             val result = camera.capture(onTriggered = ::onTriggered)
             if (flash == Flash.CAPTURE && lit) runCatching { light.setOff() }.onFailure { Log.w(TAG, "flash off", it) }
             val flashRecord = flashRecord(lit)
-            // The depth frame nearest the pair, while it is still in the Helios's short history.
-            val depth = if (helios.isOpen) result.getOrNull()?.let { helios.capture(it.hostTimeNs) } else null
+            // Depth only now that the pair is in: the ToF light would have been in its NIR.
+            val depth = result.getOrNull()?.let { grabDepth(it.hostTimeNs) }
+            resumeDepthPreview()
             main.post {
                 capturing = false
                 binding.shutterProgress.visibility = View.GONE
@@ -711,8 +736,8 @@ class MainActivity : AppCompatActivity() {
      * The HDR shutter: [BurstPlan.count] pairs bracketed around each source's dial
      * exposure, merged and saved by [BurstStore]. The flash, when set, is lit for the
      * whole bracket, since every frame of it has to see the same light for the merge to
-     * mean anything. One Helios depth frame goes with the burst, the one nearest the
-     * anchor bracket -- the exposure the dial is set to.
+     * mean anything. One Helios depth frame goes with the burst, grabbed once the whole
+     * bracket is in; its delay is measured from the anchor, the exposure the dial is set to.
      */
     private fun captureHdr() {
         capturing = true
@@ -726,25 +751,18 @@ class MainActivity : AppCompatActivity() {
             val stamp = CaptureStore.newStamp()
             val lit = flash != Flash.OFF && runCatching { light.setOn(); true }
                 .onFailure { Log.w(TAG, "flash on", it) }.getOrDefault(false)
-            var depthSnapshot: HeliosCamera.Snapshot? = null
+            darkenDepth()
             val result = camera.captureBurst(
                 plan.exposures(dial),
                 onTriggered = ::onTriggered,
-                onStep = { k ->
-                    // The anchor's exposure is still in the Helios's short history now;
-                    // by the end of the burst it would not be.
-                    if (k == plan.anchorIndex && helios.isOpen) depthSnapshot = helios.snapshot()
-                    main.post { showMessage(getString(R.string.hdr_progress_fmt, k + 1, plan.count)) }
-                },
+                onStep = { k -> main.post { showMessage(getString(R.string.hdr_progress_fmt, k + 1, plan.count)) } },
             )
             if (flash == Flash.CAPTURE && lit) runCatching { light.setOff() }.onFailure { Log.w(TAG, "flash off", it) }
             val flashRecord = flashRecord(lit)
             val anchor = plan.anchorIndex
-            val depth = if (helios.isOpen) {
-                result.getOrNull()?.let { burst ->
-                    helios.capture(burst[anchor.coerceIn(0, burst.lastIndex)].hostTimeNs, from = depthSnapshot)
-                }
-            } else null
+            // After the whole bracket, measured from the anchor's exposure.
+            val depth = result.getOrNull()?.let { burst -> grabDepth(burst[anchor.coerceIn(0, burst.lastIndex)].hostTimeNs) }
+            resumeDepthPreview()
             main.post {
                 capturing = false
                 binding.shutterProgress.visibility = View.GONE
@@ -784,7 +802,7 @@ class MainActivity : AppCompatActivity() {
      * (the DCS light is software-timed and has a few ms of slack), with a pause for the
      * phone's LED to reach full output. Both lights are off for the ambient half even when
      * the NIR light is in ALWAYS mode, and back to that mode afterwards. Each half gets its
-     * own depth frame, snapshotted at its anchor step.
+     * own depth frame, grabbed after its bracket with the Helios dark during both.
      */
     private fun captureCompare() {
         capturing = true
@@ -805,18 +823,16 @@ class MainActivity : AppCompatActivity() {
             if (phoneOn || nirOn) Thread.sleep(LIGHT_SETTLE_MS)
 
             fun burst(label: Int, triggered: () -> Unit): Pair<Result<List<JaiCamera.Capture>>, Result<HeliosCamera.Capture>?> {
-                var snapshot: HeliosCamera.Snapshot? = null
+                darkenDepth()
                 val result = camera.captureBurst(
                     exposures,
                     onTriggered = triggered,
                     onStep = { k ->
-                        if (k == plan.anchorIndex && helios.isOpen) snapshot = helios.snapshot()
                         main.post { showMessage(getString(R.string.compare_progress_fmt, getString(label), k + 1, plan.count)) }
                     },
                 )
-                val depth = if (helios.isOpen) result.getOrNull()?.let {
-                    helios.capture(it[plan.anchorIndex.coerceIn(0, it.lastIndex)].hostTimeNs, from = snapshot)
-                } else null
+                // grab() leaves the Helios dark again, so the next half's NIR is clean too.
+                val depth = result.getOrNull()?.let { grabDepth(it[plan.anchorIndex.coerceIn(0, it.lastIndex)].hostTimeNs) }
                 return result to depth
             }
 
@@ -833,6 +849,7 @@ class MainActivity : AppCompatActivity() {
             val (ambient, ambientDepth) =
                 if (lit.isSuccess) burst(R.string.compare_ambient) {} else Pair(Result.failure<List<JaiCamera.Capture>>(lit.exceptionOrNull()!!), null)
             if (flash == Flash.ALWAYS && light.isOpen) runCatching { light.setOn() }.onFailure { Log.w(TAG, "flash restore", it) }
+            resumeDepthPreview()
 
             main.post {
                 capturing = false

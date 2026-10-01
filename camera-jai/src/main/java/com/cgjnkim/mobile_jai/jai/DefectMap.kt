@@ -143,6 +143,71 @@ object DefectFix {
         for ((k, i) in defects.withIndex()) set(i, repaired[k])
     }
 
+    /**
+     * Pixels that stand out the same way in two pictures of one scene under different
+     * light: a flash comparison's lit and ambient halves.
+     *
+     * A defect adds the same offset whatever the light; the scene does not. So a sample
+     * that is [minExcess] or more above the median of its same-colour neighbours in both
+     * [a] and [b], by amounts within [agreement] of each other, while the pixels right next
+     * to it are not raised, is the sensor's and not the scene's -- it is exactly what
+     * vanishes from their difference. This finds what a fixed map cannot: defects that
+     * appear with temperature or with exposures longer than the map was measured at.
+     *
+     * Returns indices for [correct]. The scan is cheap where nothing stands out: a sample
+     * is looked at closely only when it beats every same-colour axial neighbour by
+     * [minExcess] in [a].
+     */
+    fun commonOutliers(
+        a: FloatArray,
+        b: FloatArray,
+        width: Int,
+        height: Int,
+        bayer: Boolean,
+        minExcess: Float = 6f,
+        agreement: Float = 0.35f,
+    ): IntArray {
+        require(a.size == b.size && a.size >= width * height)
+        val d = if (bayer) 2 else 1
+        val values = FloatArray(12)
+        val out = ArrayList<Int>()
+
+        fun excess(img: FloatArray, x: Int, y: Int): Float {
+            var n = 0
+            if (bayer) {
+                for (t in FAR.indices step 2) values[n++] = img[(y + FAR[t + 1]) * width + x + FAR[t]]
+                if ((x + y) and 1 == 1) for (t in GREEN_NEAR.indices step 2) values[n++] = img[(y + GREEN_NEAR[t + 1]) * width + x + GREEN_NEAR[t]]
+            } else {
+                for (t in MONO.indices step 2) values[n++] = img[(y + MONO[t + 1]) * width + x + MONO[t]]
+            }
+            return img[y * width + x] - median(values, n)
+        }
+
+        // Three from the edge: a neighbour's own neighbours are two further out.
+        for (y in 3 until height - 3) {
+            val row = y * width
+            for (x in 3 until width - 3) {
+                val i = row + x
+                val v = a[i]
+                // Quick reject: not above all four same-colour axial neighbours.
+                if (v - minExcess <= a[i - d] || v - minExcess <= a[i + d] ||
+                    v - minExcess <= a[i - d * width] || v - minExcess <= a[i + d * width]) continue
+                val ea = excess(a, x, y)
+                if (ea < minExcess) continue
+                val eb = excess(b, x, y)
+                if (eb < minExcess) continue
+                if (kotlin.math.abs(ea - eb) > agreement * maxOf(ea, eb)) continue
+                // Isolated: a point of light in the scene spreads over its neighbours, a
+                // defective sample does not. Each neighbour is judged against its own
+                // colour, since on a mosaic the adjacent samples are other colours.
+                if (excess(a, x - 1, y) > 0.3f * ea || excess(a, x + 1, y) > 0.3f * ea ||
+                    excess(a, x, y - 1) > 0.3f * ea || excess(a, x, y + 1) > 0.3f * ea) continue
+                out += i
+            }
+        }
+        return out.toIntArray()
+    }
+
     private fun median(v: FloatArray, n: Int): Float {
         java.util.Arrays.sort(v, 0, n)
         return if (n % 2 == 1) v[n / 2] else (v[n / 2 - 1] + v[n / 2]) / 2f

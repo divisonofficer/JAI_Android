@@ -21,6 +21,9 @@ class CaptureEntry(
     val hdrTiffs: Map<String, Uri> = emptyMap(),
     /** An HDR burst's bracket frames, by source label, shortest exposure first. */
     val bracketTiffs: Map<String, List<Uri>> = emptyMap(),
+    /** For one half of a flash comparison: "lit" or "ambient", and the other half's stamp. */
+    val compareRole: String? = null,
+    val partnerStamp: String? = null,
 ) {
     val isHdr: Boolean get() = hdrTiffs.isNotEmpty()
 
@@ -76,9 +79,36 @@ object CaptureLibrary {
                         generateSequence(0) { it + 1 }.map { files["_${l}_b$it.tiff"] }.takeWhile { it != null }
                             .filterNotNull().toList()
                     }.filterValues { it.isNotEmpty() },
-                )
+                ).let { entry -> withCompare(context, entry) }
             }
     }
+
+    /**
+     * Reads a burst's comparison role from its metadata. Only bursts can be halves of a
+     * comparison, so only their (small) JSON files are opened.
+     */
+    private fun withCompare(context: Context, entry: CaptureEntry): CaptureEntry {
+        if (!entry.isHdr) return entry
+        val compare = metadata(context, entry)?.optJSONObject("compare") ?: return entry
+        return CaptureEntry(
+            entry.stamp, entry.rgbTiff, entry.nirTiff, entry.preview, entry.metadata,
+            entry.depthTiffs, entry.hdrTiffs, entry.bracketTiffs,
+            compareRole = compare.optString("role").takeIf { it.isNotEmpty() },
+            partnerStamp = compare.optString("partner").takeIf { it.isNotEmpty() },
+        )
+    }
+
+    /**
+     * What the gallery shows as one scene each: every capture, except the ambient half of
+     * a flash comparison whose lit half is also there -- the pair is one scene, reached
+     * through its lit half. An ambient half whose partner was deleted stands on its own.
+     */
+    fun scenes(all: List<CaptureEntry>): List<CaptureEntry> {
+        val stamps = all.mapTo(HashSet()) { it.stamp }
+        return all.filterNot { it.isFoldedAmbient(stamps) }
+    }
+
+    fun CaptureEntry.isFoldedAmbient(stamps: Set<String>) = compareRole == "ambient" && partnerStamp in stamps
 
     fun metadata(context: Context, entry: CaptureEntry): JSONObject? = entry.metadata?.let { uri ->
         runCatching {

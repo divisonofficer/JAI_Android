@@ -18,17 +18,18 @@ import kotlin.math.abs
  * A Lucid Helios2 time-of-flight camera over GigE Vision, next to the JAI on the same
  * tethered link.
  *
- * It streams one format all the time, Coord3D_ABCY16: per pixel the point's X, Y and Z
- * and the reflected intensity, 640x480. The preview shows depth or intensity from it and
- * a capture keeps the whole frame, so unlike the JAI there is no mode switch to make and
- * a capture costs the Helios nothing.
+ * One format, Coord3D_ABCY16: per pixel the point's X, Y and Z and the reflected
+ * intensity, 640x480. The preview shows depth or intensity from it and a capture keeps
+ * the whole frame.
  *
- * ### Pairing with the JAI
+ * ### Dark unless asked
  *
- * The two cameras share no trigger line and no PTP here, so a pair is matched in time:
- * each camera's clock is latched against the phone's (see [GvcpControl.latchClock]) and
- * the depth frame whose exposure lies nearest the JAI pair's is taken. At the default
- * rate that is within half a frame period, 50 ms, and the skew goes into the capture.
+ * The ToF illuminator is near-infrared and lights the scene whenever the Helios
+ * acquires, which the JAI's NIR sensor sees. So it acquires only while asked to --
+ * [startStreaming] for the depth preview -- and otherwise sits configured and dark. A
+ * capture takes the JAI's frames first with the Helios dark, then [grab]s one depth
+ * frame. The two are therefore not simultaneous: the depth frame follows the pair by
+ * the Helios's start-up time, and that delay goes into the capture.
  *
  * Blocking calls belong off the main thread.
  */
@@ -51,6 +52,13 @@ class HeliosCamera : AutoCloseable {
         val packetDelayUs: Double = 40.0,
         /** Where to move the camera within the tethered subnet when it is elsewhere; the JAI takes .200. */
         val cameraHostPart: Int = 201,
+        /**
+         * Integration time set on every open, since a restart puts the camera back to its
+         * own default of 350 us. On the rig's supply 350 us restarts it within a second of
+         * AcquisitionStart (even at 2 fps) while 88 us and 13 us stream for good: the
+         * illuminator's pulse, not the frame rate, is what the supply cannot carry.
+         */
+        val exposureTime: String = "Exp88Us",
     )
 
     /** The settings a frame was taken at, read back from the camera. */
@@ -63,7 +71,7 @@ class HeliosCamera : AutoCloseable {
         val temperatureC: Double?,
     )
 
-    /** One depth frame for a capture, with where it sits against the other camera. */
+    /** One depth frame for a capture, and how long after the JAI pair it was exposed. */
     class Capture(val frame: DepthFrame, val settings: Settings, val skewNs: Long)
 
     @Volatile var error: String = ""
@@ -79,6 +87,10 @@ class HeliosCamera : AutoCloseable {
 
     /** False again once the camera has dropped us (see [GvcpControl.controlLost]), so the owner reconnects. */
     val isOpen: Boolean get() = control.let { it != null && !it.controlLost } && nodes != null
+
+    /** Acquiring, and so lighting the scene in NIR. */
+    @Volatile var isStreaming = false
+        private set
 
     @Volatile var frameRate = 0.0
         private set
@@ -105,7 +117,8 @@ class HeliosCamera : AutoCloseable {
 
     // ---- lifecycle --------------------------------------------------------------------
 
-    fun open(config: Config = Config()): Boolean {
+    /** Connects and configures; acquires only with [stream], see the class comment. */
+    fun open(config: Config = Config(), stream: Boolean = false): Boolean {
         // A connection the camera dropped still has its sockets and threads.
         if (control != null) close()
         this.config = config
@@ -132,8 +145,10 @@ class HeliosCamera : AutoCloseable {
             nodes = NodeMap(xml, control)
 
             synchronized(nodeLock) {
+                noteRestart()
                 configure(link.address)
-                start()
+                avoidRestarts()
+                if (stream) start() else prepare()
             }
             return true
         } catch (e: Exception) {
@@ -141,6 +156,30 @@ class HeliosCamera : AutoCloseable {
             close()
             return fail("${e.javaClass.simpleName}: ${e.message}")
         }
+    }
+
+    /**
+     * Whether the camera restarted since the last AcquisitionStart that was never
+     * stopped: it has been up for less time than that start is old. The mode and
+     * integration time it was started with are then taken to be what restarts it.
+     */
+    private fun noteRestart() {
+        val started = lastStart ?: return
+        val upNs = runCatching { nodes!!.getInt("DeviceUpTime") }.getOrNull()?.times(1_000_000_000L) ?: return
+        if (upNs < System.nanoTime() - lastStartNs) {
+            Log.w(TAG, "restarted after streaming in ${started.first} ${started.second}; avoiding that from now on")
+            restartingSettings += started
+        }
+        lastStart = null
+    }
+
+    /** The configured integration time, or the longest one this mode has that has not restarted the camera. */
+    private fun avoidRestarts() {
+        val n = nodes!!
+        val mode = n.getEnum("Scan3dOperatingMode")
+        val allowed = n.availableEntries("ExposureTimeSelector").filter { (mode to it) !in restartingSettings }
+        val wanted = config.exposureTime.takeIf { it in allowed } ?: allowed.firstOrNull() ?: return
+        n.ensureEnum("ExposureTimeSelector", wanted)
     }
 
     /** What does not change while open. Called with [nodeLock] held. */
@@ -168,9 +207,9 @@ class HeliosCamera : AutoCloseable {
 
     /**
      * Everything that follows the operating mode -- the frame rate it allows, the scale
-     * of the coordinates -- then acquisition. Called with [nodeLock] held and stopped.
+     * of the coordinates. Called with [nodeLock] held and stopped.
      */
-    private fun start() {
+    private fun prepare() {
         val n = nodes!!
         n.ensureInt("TLParamsLocked", 0)
         // AcquisitionFrameRate is a Converter over AcquisitionFrameTime (us), and its
@@ -181,15 +220,40 @@ class HeliosCamera : AutoCloseable {
         n.ensureInt("AcquisitionFrameTime", frameTime)
         frameRate = 1e6 / n.getInt("AcquisitionFrameTime")
         readState()
+    }
+
+    /** [prepare], then acquisition. Called with [nodeLock] held and stopped. */
+    private fun start() {
+        val n = nodes!!
+        prepare()
         n.setInt("TLParamsLocked", 1)
+        lastStart = operatingMode to exposureTime
+        lastStartNs = System.nanoTime()
         n.execute("AcquisitionStart")
+        isStreaming = true
         Log.i(TAG, "streaming: ${describeLocked()}")
     }
 
     private fun stop() {
         val n = nodes ?: return
-        tryDo("AcquisitionStop") { n.execute("AcquisitionStop") }
+        // Refused or unanswered when the camera has dropped us or is restarting: the
+        // start then stays on record for noteRestart to judge.
+        val stopped = runCatching { n.execute("AcquisitionStop") }
+            .onFailure { Log.w(TAG, "AcquisitionStop: ${it.message}") }.isSuccess
         tryDo("TLParamsLocked") { n.setInt("TLParamsLocked", 0) }
+        isStreaming = false
+        if (stopped) lastStart = null
+    }
+
+    /** For the depth preview; the illuminator is on from here. */
+    fun startStreaming() = synchronized(nodeLock) {
+        requireNodes()
+        if (!isStreaming) start()
+    }
+
+    /** Dark again: nothing of the Helios reaches the JAI's NIR frames after this returns. */
+    fun stopStreaming() = synchronized(nodeLock) {
+        if (isStreaming) stop()
     }
 
     private fun readState() {
@@ -225,9 +289,9 @@ class HeliosCamera : AutoCloseable {
         requireNodes().availableEntries("Scan3dOperatingMode") - crashingModes
     }
 
-    /** Integration times the current mode allows. */
+    /** Integration times the current mode allows, less any that restarted the camera. */
     fun exposureTimes(): List<String> = synchronized(nodeLock) {
-        requireNodes().availableEntries("ExposureTimeSelector")
+        requireNodes().availableEntries("ExposureTimeSelector").filter { (operatingMode to it) !in restartingSettings }
     }
 
     /**
@@ -255,6 +319,13 @@ class HeliosCamera : AutoCloseable {
     /** Modes that restarted the camera when tried; see [setOperatingMode]. */
     private val crashingModes = HashSet<String>()
 
+    /** Mode and integration time pairs that restarted the camera once streaming; see [noteRestart]. */
+    private val restartingSettings = HashSet<Pair<String, String>>()
+
+    // The last AcquisitionStart not followed by a stop, kept across a reconnect.
+    private var lastStart: Pair<String, String>? = null
+    private var lastStartNs = 0L
+
     /**
      * Stops, applies [change], starts again, and makes sure the camera is still ours.
      * If it restarted instead, the stream is set up again from scratch before failing.
@@ -263,12 +334,16 @@ class HeliosCamera : AutoCloseable {
         val n = requireNodes()
         val c = control!!
         val uptime = runCatching { n.getInt("DeviceUpTime") }.getOrDefault(Long.MAX_VALUE)
+        // Dark stays dark: the change is then only a register write, and any restart it
+        // causes shows up at the next start instead.
+        val streaming = isStreaming
         stop()
         try {
             change(n)
         } finally {
-            start()
+            if (streaming) start() else prepare()
         }
+        if (!streaming) return@synchronized
         Thread.sleep(SWITCH_SETTLE_MS)
         awaitAnswer(c)
         val restarted = (c.readReg(Bootstrap.CCP) and Bootstrap.CCP_CONTROL) == 0L ||
@@ -308,45 +383,52 @@ class HeliosCamera : AutoCloseable {
     /** The newest depth frame, or null before the first. */
     fun latestFrame(): DepthFrame? = latest?.let { DepthFrame(it, scale, offset) }
 
-    /** The frames on hand at one moment, held for a [capture] against a time that will have passed. */
-    class Snapshot internal constructor(internal val frames: List<RawFrame>)
-
     /**
-     * Holds the current history -- about [RECENT_KEEP] frames -- beyond its usual life.
-     * For a JAI burst, which outlasts that history: snapshot when the frame to match has
-     * just been exposed, match once the burst is over.
+     * One depth frame, taken now: acquisition starts if it was dark, the first frame
+     * exposed after that is kept, and acquisition stops again unless [keepStreaming].
+     * Called once the JAI's frames are in, so its NIR never sees this.
+     *
+     * From dark, AcquisitionStart takes about 90 ms and the first frame arrives about
+     * 430 ms after it, with as many valid pixels as a frame in steady streaming: there
+     * is no warm-up to wait out.
+     *
+     * @param afterHostNs the JAI pair's exposure on the phone's clock; the capture
+     *   records how long after it the depth frame was exposed
      */
-    fun snapshot(): Snapshot = synchronized(frameLock) { Snapshot(recent.toList()) }
-
-    /**
-     * The depth frame exposed nearest [hostTimeNs] (System.nanoTime()), waiting for
-     * the first frame after it when it has not arrived yet. With [from], the snapshot's
-     * frames are candidates too, and nothing is waited for.
-     */
-    fun capture(hostTimeNs: Long, timeoutMs: Long = CAPTURE_TIMEOUT_MS, from: Snapshot? = null): Result<Capture> = runCatching {
+    fun grab(afterHostNs: Long, keepStreaming: Boolean = false, timeoutMs: Long = GRAB_TIMEOUT_MS): Result<Capture> = runCatching {
         val clock: GvcpControl.ClockSample
         val settings: Settings
+        val startedNs: Long
         synchronized(nodeLock) {
             val c = control ?: throw IllegalStateException("Helios is not open")
+            val n = requireNodes()
+            if (!isStreaming) start()
+            startedNs = System.nanoTime()
             clock = c.latchClock(tickFrequency)
-            val temperature = runCatching { nodes!!.getFloat("DeviceTemperature") }.getOrNull()
+            val temperature = runCatching { n.getFloat("DeviceTemperature") }.getOrNull()
             settings = Settings(operatingMode, exposureTime, frameRate, scale.copyOf(), offset.copyOf(), temperature)
         }
-        val deadline = System.currentTimeMillis() + timeoutMs
-        val best = (if (from != null) {
-            (from.frames + synchronized(frameLock) { recent.toList() })
-                .minByOrNull { abs(clock.toHostNs(it.timestamp) - hostTimeNs) }
-        } else synchronized(frameLock) {
-            while (recent.isEmpty() || clock.toHostNs(recent.last().timestamp) < hostTimeNs) {
-                val wait = deadline - System.currentTimeMillis()
-                if (wait <= 0) break
-                frameLock.wait(wait)
+        try {
+            val deadline = System.currentTimeMillis() + timeoutMs
+            val frame = synchronized(frameLock) {
+                var found: RawFrame? = null
+                while (found == null) {
+                    found = recent.filter { clock.toHostNs(it.timestamp) >= startedNs }.getOrNull(GRAB_SKIP)
+                    if (found != null) break
+                    val wait = deadline - System.currentTimeMillis()
+                    if (wait <= 0) throw IllegalStateException("no depth frame within $timeoutMs ms")
+                    frameLock.wait(wait)
+                }
+                found!!
             }
-            recent.minByOrNull { abs(clock.toHostNs(it.timestamp) - hostTimeNs) }
-        }) ?: throw IllegalStateException("no depth frame within $timeoutMs ms")
-        val skew = clock.toHostNs(best.timestamp) - hostTimeNs
-        Log.i(TAG, "capture: block ${best.blockId}, %.1f ms from the target".format(skew / 1e6))
-        Capture(DepthFrame(best, settings.scale, settings.offset), settings, skew)
+            val delay = clock.toHostNs(frame.timestamp) - afterHostNs
+            Log.i(TAG, "grab: block ${frame.blockId}, %.0f ms after the pair, %.0f ms after start".format(
+                delay / 1e6, (clock.toHostNs(frame.timestamp) - startedNs) / 1e6,
+            ))
+            Capture(DepthFrame(frame, settings.scale, settings.offset), settings, delay)
+        } finally {
+            if (!keepStreaming) synchronized(nodeLock) { stop() }
+        }
     }
 
     private fun onFrame(f: RawFrame) {
@@ -397,17 +479,17 @@ class HeliosCamera : AutoCloseable {
         const val TAG = "Helios"
         const val PIXEL_FORMAT = "Coord3D_ABCY16"
         const val IP_UDP_GVSP_HEADERS = 20 + 8 + 8
-        const val CAPTURE_TIMEOUT_MS = 1500L
+        const val GRAB_TIMEOUT_MS = 3000L
+
+        /** Frames to let pass after the start before keeping one; none needed, see [grab]. */
+        const val GRAB_SKIP = 0
 
         /** A restart starts about 0.5 s after AcquisitionStart and lasts about 11 s. */
         const val SWITCH_SETTLE_MS = 1_000L
         const val RESTART_WAIT_MS = 20_000L
 
-        /**
-         * About 1.5 s of frames at the default rate, 2.4 MB each: long enough that a
-         * JAI pair's exposure is still here when the pair itself arrives.
-         */
-        const val RECENT_KEEP = 12
+        /** About a second of frames at the default rate, 2.4 MB each. */
+        const val RECENT_KEEP = 8
 
         val AXES = listOf("CoordinateA", "CoordinateB", "CoordinateC")
     }

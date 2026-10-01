@@ -31,7 +31,7 @@ import java.util.Locale
  * go to Documents/, because MediaStore refuses non-media files under Pictures/; a small
  * JPEG of the RGB view goes to Pictures/ so the capture shows up in a gallery at all.
  *
- * With the Helios connected, its depth frame nearest the pair in time is saved beside
+ * With the Helios connected, one depth frame taken just after the pair is saved beside
  * them, as the camera sent it (640x480, not rotated or cropped): X, Y and Z as 16-bit
  * counts in `_depth_x/_y/_z.tiff`, `mm = count * scale + offset` per axis, 65535 where
  * there was no measurement, and the ToF intensity in `_depth_intensity.tiff`.
@@ -191,9 +191,9 @@ object CaptureStore {
         s.temperatureC?.let { put("temperature_c", it) }
         put("timestamp_ticks", f.timestamp)
         put("block_id", f.raw.blockId)
-        // Matched in time, not triggered together: see HeliosCamera.
-        put("sync", "nearest frame by host-mapped device clocks, no shared trigger")
-        put("skew_ms", d.skewNs / 1e6)
+        // Taken after the JAI's frames, with the ToF dark during them: see HeliosCamera.
+        put("sync", "sequential: ToF off while the JAI exposed, one frame grabbed after; delay by host-mapped device clocks")
+        put("delay_ms", d.skewNs / 1e6)
         put("orientation", "as the camera sends it, not rotated")
     }
 

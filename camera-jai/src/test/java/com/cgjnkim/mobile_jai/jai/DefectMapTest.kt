@@ -92,8 +92,48 @@ class DefectMapTest {
             assertEquals(m.size, all.size)
             assertTrue(m.indicesFor(Upright.SIDE, Upright.SIDE)!!.isNotEmpty())
         }
-        assertEquals(123, DefectMap.forCamera("SX161326", JaiCamera.Source.RGB)!!.size)
-        assertEquals(192, DefectMap.forCamera("SX161326", JaiCamera.Source.NIR)!!.size)
+        assertEquals(781, DefectMap.forCamera("SX161326", JaiCamera.Source.RGB)!!.size)
+        assertEquals(851, DefectMap.forCamera("SX161326", JaiCamera.Source.NIR)!!.size)
         assertEquals(null, DefectMap.forCamera("OTHER", JaiCamera.Source.RGB))
+    }
+}
+
+class CommonOutliersTest {
+
+    private val w = 32
+    private val h = 32
+
+    /** A smooth RGGB scene: each colour a gentle ramp, brighter overall under [light]. */
+    private fun scene(light: Float) = FloatArray(w * h) { i ->
+        val x = i % w
+        val y = i / w
+        val base = when {
+            x % 2 == 0 && y % 2 == 0 -> 100f
+            x % 2 == 1 && y % 2 == 1 -> 60f
+            else -> 200f
+        }
+        (base + x * 2f) * light
+    }
+
+    @Test
+    fun `a defect present in both halves is found, scene light is not`() {
+        val lit = scene(3f)
+        val ambient = scene(1f)
+        val hot = 10 * w + 12      // R site, same +80 offset in both
+        lit[hot] += 80f
+        ambient[hot] += 80f
+        val lamp = 20 * w + 20     // a point the lights brightened: only in the lit half
+        lit[lamp] += 300f
+        val found = DefectFix.commonOutliers(lit, ambient, w, h, bayer = true).toList()
+        assertEquals(listOf(hot), found)
+    }
+
+    @Test
+    fun `a bright spot spread over neighbours is scene, not defect`() {
+        val lit = scene(1f)
+        val ambient = scene(1f)
+        val c = 16 * w + 16
+        for (i in listOf(c, c - 1, c + 1, c - w, c + w)) { lit[i] += 100f; ambient[i] += 100f }
+        assertTrue(DefectFix.commonOutliers(lit, ambient, w, h, bayer = true).isEmpty())
     }
 }

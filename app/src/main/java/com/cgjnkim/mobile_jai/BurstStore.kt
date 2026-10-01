@@ -140,7 +140,7 @@ object BurstStore {
         put("type", "hdr_burst")
         // Lit, when lit, for the whole bracket: every frame saw the same light.
         flash?.let { put("flash", CaptureStore.flashJson(it)) }
-        // skew_ms is from the anchor bracket, the one exposed at the dial's setting.
+        // delay_ms is from the anchor bracket, the one exposed at the dial's setting.
         depth?.let { put("depth", CaptureStore.depthJson(it, depthDevice)) }
         put("camera", JSONObject().apply {
             put("vendor", device?.vendor)
