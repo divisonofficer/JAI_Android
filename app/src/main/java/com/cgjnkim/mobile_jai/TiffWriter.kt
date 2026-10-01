@@ -257,6 +257,47 @@ object TiffWriter {
         }
     }
 
+    /**
+     * One plane of 16-bit IEEE half floats: an exported radiance map at half the size.
+     *
+     * A half keeps 11 significant bits, a relative step of 1/2048 -- far below the noise of
+     * a 12-bit sensor at any level -- across 2^-14 to 65504. Values above that become
+     * infinity, so the caller scales a map whose highlights would reach it.
+     */
+    fun writeFloat16(out: OutputStream, pixels: FloatArray, width: Int, height: Int, description: String) {
+        require(pixels.size >= width * height) { "have ${pixels.size} samples, need ${width * height}" }
+        writeDeflated(out, width, height, description, bytesPerSample = 2, sampleFormat = SAMPLE_FLOAT) { raw, y ->
+            val base = y * width
+            for (x in 0 until width) raw.putShort(half(pixels[base + x]))
+        }
+    }
+
+    /** The IEEE half nearest [f] (ties to even); NaN stays NaN, too large becomes infinity. */
+    fun half(f: Float): Short {
+        val bits = java.lang.Float.floatToRawIntBits(f)
+        val sign = (bits ushr 16) and 0x8000
+        val exp = (bits ushr 23) and 0xFF
+        val mant = bits and 0x7FFFFF
+        if (exp == 0xFF) return (sign or 0x7C00 or (if (mant != 0) 0x200 else 0)).toShort()
+        val e = exp - 127 + 15
+        if (e >= 0x1F) return (sign or 0x7C00).toShort()
+        if (e <= 0) {
+            // Subnormal half, or zero.
+            if (e < -10) return sign.toShort()
+            val m = mant or 0x800000
+            val shift = 14 - e
+            var h = m ushr shift
+            val rem = m and ((1 shl shift) - 1)
+            val halfway = 1 shl (shift - 1)
+            if (rem > halfway || (rem == halfway && (h and 1) == 1)) h++
+            return (sign or h).toShort()
+        }
+        var h = (e shl 10) or (mant ushr 13)
+        val rem = mant and 0x1FFF
+        if (rem > 0x1000 || (rem == 0x1000 && (h and 1) == 1)) h++ // a carry into the exponent is right, up to infinity
+        return (sign or h).toShort()
+    }
+
     private const val TAG_PLANAR_CONFIG = 284
     private const val RGB_ENTRY_COUNT = 12
 

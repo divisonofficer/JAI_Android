@@ -37,6 +37,12 @@ class ExportBench {
             t("write nir float32 tiff") {
                 val o = ByteArrayOutputStream(); TiffWriter.writeFloat32(o, merged, w, h, "x"); println("   nir size ${o.size() / 1e6} MB")
             }
+            t("write bayer float16 tiff") {
+                val outDir = File(dir, "out").apply { mkdirs() }
+                File(outDir, "rgb_ref.f32").writeBytes(java.nio.ByteBuffer.allocate(rgb.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).also { b -> rgb.forEach { b.putFloat(it) } }.array())
+                File(outDir, "rgb_f16.tiff").outputStream().use { TiffWriter.writeFloat16(it, merged, w, h, "x") }
+                println("   bayer f16 size ${File(outDir, "rgb_f16.tiff").length() / 1e6} MB")
+            }
             t("read float hdr tiff") { TiffReader.readFloat(File(dir, "${stamp}_rgb_hdr.tiff").readBytes()) }
         }
     }
