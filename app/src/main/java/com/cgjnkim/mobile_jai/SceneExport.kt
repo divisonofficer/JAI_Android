@@ -30,10 +30,10 @@ import java.util.zip.ZipOutputStream
  * Units, all linear:
  * - single captures: 16-bit, 12-bit counts above black (black 99) times the white-balance
  *   gain, so a channel can exceed 4095 after balancing; clipped at 65535
- * - HDR merges: float32, counts above black at the burst's reference exposure, balanced
- * - ACTIVE: float32, lit minus ambient in the same units; negative where the scene moved
- * - depth: float32 x, y, z in millimetres (NaN where nothing was measured), and the
- *   intensity plane as recorded
+ * - HDR merges: float32, counts above black at the burst's reference exposure, balanced;
+ *   a flash comparison as its lit and passive (flash off) halves
+ * - depth: float32 z in millimetres on the JAI's image (NaN where no point lands), and
+ *   the Helios's planes as saved for processing later -- of a comparison, the lit half's
  */
 object SceneExport {
 
@@ -101,13 +101,11 @@ object SceneExport {
                 put("orientation", "upright 1080x1080, rotated 90 degrees counter-clockwise from the sensor")
                 put("units", JSONObject().apply {
                     put("rgb.tiff / nir.tiff", "uint16, 12-bit counts above black x white balance")
-                    put("*_hdr / *_lit / *_ambient", "float32, counts above black at the reference exposure x white balance (RGB)")
-                    put("*_active", "float32, lit - ambient in the same units")
-                    put("depth_xyz_mm.tiff", "float32 x, y, z in mm, NaN = no measurement, Helios orientation (not rotated)")
-                    put("depth_intensity.tiff", "uint16, as recorded")
-                    put("depth_raw_*.tiff", "the Helios planes as saved: uint16 Coord3D_ABCY16, mm = value x scale + offset (metadata depth)")
-                    put("depth_on_jai_xyz_mm.tiff", "float32 x, y, z in mm in the JAI camera frame, on the JAI image grid (upright 1080x1080), NaN = no point; each ToF point fills its ~3.5 px footprint, nearer wins; needs depth_calibration")
-                    put("depth_on_jai_preview.png", "depth colour (turbo, near to far) over the NIR, for checking the alignment")
+                    put("*_hdr / *_lit / *_passive", "float32, counts above black at the reference exposure x white balance (RGB); lit = flash on, passive = flash off, same exposures")
+                    put("depth*_on_jai_mm.tiff", "float32 depth (z) in mm in the JAI camera frame, on the JAI image grid (upright 1080x1080), NaN = no point; each ToF point fills its ~3.5 px footprint, nearer wins; needs depth_calibration")
+                    put("depth*_on_jai_preview.png", "depth colour (turbo, near to far) over the NIR, for checking the alignment")
+                    put("depth*_raw_x/y/z.tiff", "the Helios planes as saved, Helios orientation: uint16 Coord3D_ABCY16, mm = value x scale + offset, 65535 = no measurement (metadata depth)")
+                    put("depth*_raw_intensity.tiff", "uint16 Helios intensity, as saved")
                 })
             })
             put("depth_calibration", calib?.let { (name, reg) -> reg.toJson().put("name", name) } ?: JSONObject.NULL)
@@ -177,20 +175,18 @@ object SceneExport {
             val l = CaptureProcessing.hdr(context, lit, litMeta, source) ?: continue
             val a = CaptureProcessing.hdr(context, ambient, ambMeta, source) ?: continue
             mended.put(source.label.lowercase(), CaptureProcessing.mendPair(l, a, source))
-            val diff = TiffReader.FloatRaw(CaptureProcessing.active(l, litMeta, a, ambMeta, source), l.width, l.height, null)
             val label = source.label.lowercase()
-            if (source == JaiCamera.Source.NIR) { nirViews["lit"] = hdrView(l); nirViews["ambient"] = hdrView(a) }
-            for ((suffix, raw) in listOf("lit" to l, "ambient" to a, "active" to diff)) {
+            if (source == JaiCamera.Source.NIR) nirViews["lit"] = hdrView(l)
+            for ((suffix, raw) in listOf("lit" to l, "passive" to a)) {
                 if (source == JaiCamera.Source.RGB) writeRgbHdr(raw, gains, dir, "${label}_$suffix.tiff", out, files)
                 else writeNirHdr(raw, dir, "${label}_$suffix.tiff", out, files)
             }
         }
         depth(context, lit, litMeta, calib, nirViews["lit"], dir, "_lit", out, files)
-        depth(context, ambient, ambMeta, calib, nirViews["ambient"], dir, "_ambient", out, files)
         metadataCopy(litMeta, dir, "metadata_lit.json", out, files)
-        metadataCopy(ambMeta, dir, "metadata_ambient.json", out, files)
+        metadataCopy(ambMeta, dir, "metadata_passive.json", out, files)
         return JSONObject().put("stamp", lit.stamp).put("type", "flash_comparison")
-            .put("ambient_stamp", ambient.stamp).put("pair_mended_pixels", mended).put("files", files)
+            .put("passive_stamp", ambient.stamp).put("pair_mended_pixels", mended).put("files", files)
     }
 
     // ---- writers --------------------------------------------------------------------
@@ -205,8 +201,9 @@ object SceneExport {
     }
 
     /**
-     * The Helios's planes as saved, in millimetres, and -- with a calibration -- moved
-     * onto the JAI's image, with a picture of the overlay over [nirView] to check it by.
+     * The Helios's planes as saved, for depth processing later; and -- with a calibration --
+     * its depth moved onto the JAI's image, with a picture of that over [nirView] to check
+     * the alignment by.
      */
     private fun depth(
         context: Context, e: CaptureEntry, meta: JSONObject?, calib: Registration?, nirView: IntArray?,
@@ -217,15 +214,12 @@ object SceneExport {
                 context.contentResolver.openInputStream(uri)?.use { it.copyTo(o) } ?: throw java.io.IOException("cannot read $uri")
             }
         }
-        val (xyz, intensity) = runCatching { CaptureProcessing.depth(context, e, meta) }.getOrNull() ?: return
-        write(dir, "depth${suffix}_xyz_mm.tiff", out, files) { TiffWriter.writeRgbFloat32(it, xyz.samples, xyz.width, xyz.height, "Helios x, y, z in mm, NaN = no measurement") }
-        intensity?.let { i -> write(dir, "depth${suffix}_intensity.tiff", out, files) { TiffWriter.writeGray16(it, i.samples, i.width, i.height, "Helios intensity, as recorded") } }
-
         calib ?: return
         val sample = CaptureProcessing.depthSample(context, e, meta) ?: return
         val onJai = CaptureProcessing.depthOnJai(sample, calib)
-        write(dir, "depth${suffix}_on_jai_xyz_mm.tiff", out, files) {
-            TiffWriter.writeRgbFloat32(it, onJai, calib.imageWidth, calib.imageHeight, "Helios points in the JAI camera frame, mm, on the JAI image grid, NaN = none")
+        val z = FloatArray(onJai.size / 3) { onJai[it * 3 + 2] }
+        write(dir, "depth${suffix}_on_jai_mm.tiff", out, files) {
+            TiffWriter.writeFloat32(it, z, calib.imageWidth, calib.imageHeight, "Helios depth in the JAI camera frame, mm, on the JAI image grid, NaN = none")
         }
         val w = calib.imageWidth
         val h = calib.imageHeight

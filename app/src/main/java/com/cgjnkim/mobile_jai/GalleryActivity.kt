@@ -2,7 +2,6 @@ package com.cgjnkim.mobile_jai
 
 import android.content.Intent
 import android.os.Bundle
-import android.os.SystemClock
 import android.os.Handler
 import android.os.Looper
 import android.view.LayoutInflater
@@ -13,11 +12,9 @@ import android.widget.EditText
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.cgjnkim.mobile_jai.databinding.ActivityGalleryBinding
-import com.cgjnkim.mobile_jai.databinding.DialogStorageBinding
 import com.cgjnkim.mobile_jai.databinding.ItemGalleryCellBinding
 import com.cgjnkim.mobile_jai.jai.RawDisplay
 import java.text.SimpleDateFormat
@@ -31,8 +28,8 @@ import java.util.concurrent.Executors
  *
  * Captures are grouped into scenes here: long-press a cell and drag across others to
  * select a run of them (the grid scrolls when the finger nears its edge), tap to add or
- * drop one, then assign the selection to a scene. SCENES lists them, and from there a
- * scene is exported -- shared as a ZIP or uploaded to the lab's network storage.
+ * drop one, then assign the selection to a scene. SCENES opens [SceneListActivity],
+ * where scenes are looked over and exported.
  */
 class GalleryActivity : AppCompatActivity() {
 
@@ -74,7 +71,7 @@ class GalleryActivity : AppCompatActivity() {
         binding.grid.layoutManager = GridLayoutManager(this, COLUMNS)
         binding.grid.adapter = adapter
         binding.grid.addOnItemTouchListener(dragSelect)
-        binding.scenesButton.setOnClickListener { showScenes() }
+        binding.scenesButton.setOnClickListener { startActivity(Intent(this, SceneListActivity::class.java)) }
         binding.selectionCancel.setOnClickListener { clearSelection() }
         binding.selectionAssign.setOnClickListener { chooseScene() }
         binding.selectionUnassign.setOnClickListener { unassign() }
@@ -278,168 +275,7 @@ class GalleryActivity : AppCompatActivity() {
         }
     }
 
-    private fun rebalance(s: Scene): Scene {
-        val est = SceneStore.estimateBalance(this, s.stamps, all)
-        return if (est != null) s.copy(wb = est.first, wbFrames = est.second) else s.copy(wb = RawDisplay.Gains.GLOBAL, wbFrames = 0)
-    }
-
-    private fun showScenes() {
-        if (scenes.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle(R.string.scenes)
-                .setMessage(R.string.scenes_empty)
-                .setNeutralButton(R.string.storage_settings) { _, _ -> storageSettings() }
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
-            return
-        }
-        val rows = scenes.map { s ->
-            getString(R.string.scene_row_fmt, s.name, s.stamps.size, s.wb.r, s.wb.b, if (s.wbFrames == 0) getString(R.string.scene_wb_default) else "")
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.scenes)
-            .setItems(rows.toTypedArray()) { _, which -> sceneActions(scenes[which]) }
-            .setNeutralButton(R.string.storage_settings) { _, _ -> storageSettings() }
-            .show()
-    }
-
-    private fun sceneActions(scene: Scene) {
-        val actions = listOf(
-            getString(R.string.scene_export_zip) to { exportZip(scene) },
-            getString(R.string.scene_export_upload) to { upload(scene) },
-            getString(R.string.scene_rename) to { askName(scene.name) { name -> updateScene(scene.id) { it.copy(name = name) } } },
-            getString(R.string.scene_rebalance) to { updateScene(scene.id) { rebalance(it) } },
-            getString(R.string.scene_delete) to { deleteScene(scene) },
-        )
-        AlertDialog.Builder(this)
-            .setTitle(scene.name)
-            .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
-            .show()
-    }
-
-    private fun updateScene(id: String, change: (Scene) -> Scene) {
-        runWork {
-            val next = SceneStore.load(this).map { if (it.id == id) change(it) else it }
-            SceneStore.save(this, next)
-            val s = next.firstOrNull { it.id == id }
-            s?.stamps?.forEach { Thumbnails.forget(it) }
-            s?.let { getString(R.string.scene_saved_fmt, it.name, it.stamps.size, it.wb.r, it.wb.b, it.wbFrames) }
-        }
-    }
-
-    private fun deleteScene(scene: Scene) {
-        runWork {
-            SceneStore.save(this, SceneStore.load(this).filter { it.id != scene.id })
-            scene.stamps.forEach { Thumbnails.forget(it) }
-            null
-        }
-    }
-
-    // ---- export -----------------------------------------------------------------------
-
-    private fun exportZip(scene: Scene) {
-        val progress = TaskProgress(this)
-        work.execute {
-            val outcome = runCatching {
-                val built = build(scene, progress, 1, 2)
-                progress.phase(getString(R.string.phase_fmt, getString(R.string.phase_zip), 2, 2))
-                try {
-                    SceneExport.zip(built)
-                } finally {
-                    built.folder.deleteRecursively()
-                }
-            }
-            progress.dismiss()
-            main.post {
-                outcome.onSuccess { zip ->
-                    val uri = FileProvider.getUriForFile(this, "$packageName.exports", zip)
-                    val send = Intent(Intent.ACTION_SEND)
-                        .setType("application/zip")
-                        .putExtra(Intent.EXTRA_STREAM, uri)
-                        .putExtra(Intent.EXTRA_SUBJECT, zip.name)
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    startActivity(Intent.createChooser(send, zip.name))
-                }.onFailure { message(it.message ?: it.javaClass.simpleName) }
-            }
-        }
-    }
-
-    private fun upload(scene: Scene) {
-        if (!NetworkStorage.hasPassword(this) || NetworkStorage.config(this).user.isEmpty()) {
-            storageSettings()
-            return
-        }
-        val progress = TaskProgress(this)
-        work.execute {
-            val outcome = runCatching {
-                val built = build(scene, progress, 1, 2)
-                progress.phase(getString(R.string.phase_fmt, getString(R.string.phase_upload), 2, 2))
-                val start = SystemClock.elapsedRealtime()
-                try {
-                    NetworkStorage.upload(this, built.folder) { sent, total ->
-                        val seconds = (SystemClock.elapsedRealtime() - start) / 1000.0
-                        val rate = if (seconds > 0) sent / 1e6 / seconds else 0.0
-                        progress.update(
-                            if (total > 0) sent.toDouble() / total else 0.0,
-                            getString(R.string.upload_progress_fmt, sent / 1e6, total / 1e6, rate),
-                            force = sent == total,
-                        )
-                    }.getOrThrow()
-                } finally {
-                    built.folder.deleteRecursively()
-                }
-            }
-            progress.dismiss()
-            main.post { message(outcome.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }) }
-        }
-    }
-
-    /** The export, as phase [phase] of [phases]. On [work]. */
-    private fun build(scene: Scene, progress: TaskProgress, phase: Int, phases: Int): SceneExport.Result {
-        progress.phase(getString(R.string.phase_fmt, getString(R.string.phase_export), phase, phases))
-        return SceneExport.build(this, scene, all) { done, total, what ->
-            progress.update(if (total > 0) done.toDouble() / total else 0.0, getString(R.string.export_progress_fmt, what, done, total), force = true)
-        }
-    }
-
-    /**
-     * The storage settings, with a connection test. The password field is left empty when
-     * one is stored, and only replaces it when something is typed.
-     */
-    private fun storageSettings() {
-        val c = NetworkStorage.config(this)
-        val v = DialogStorageBinding.inflate(layoutInflater)
-        v.host.setText(c.host)
-        v.share.setText(c.share)
-        v.folder.setText(c.folder)
-        v.user.setText(c.user)
-        v.domain.setText(c.domain)
-        if (NetworkStorage.hasPassword(this)) v.password.hint = getString(R.string.storage_password_saved)
-        fun save() {
-            val pw = v.password.text.toString().takeIf { it.isNotEmpty() }?.toCharArray()
-            NetworkStorage.save(
-                this,
-                NetworkStorage.Config(v.host.text.toString(), v.share.text.toString(), v.folder.text.toString(), v.user.text.toString(), v.domain.text.toString()),
-                pw,
-            )
-            pw?.fill('\u0000')
-            v.password.text.clear()
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.storage_settings)
-            .setView(v.root)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setNeutralButton(R.string.storage_test) { _, _ ->
-                save()
-                val progress = progressDialog()
-                work.execute {
-                    val r = NetworkStorage.test(this)
-                    main.post { progress.dismiss(); message(r.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }) }
-                }
-            }
-            .setPositiveButton(R.string.storage_save) { _, _ -> save() }
-            .show()
-    }
+    private fun rebalance(s: Scene): Scene = SceneStore.rebalance(this, s, all)
 
     // ---- plumbing ---------------------------------------------------------------------
 

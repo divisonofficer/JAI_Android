@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2ShareAccess
@@ -84,46 +85,84 @@ object NetworkStorage {
 
     /**
      * Copies [folder] and everything under it to \\host\share\folder\<folder name>.
+     *
+     * An export is gigabytes over Wi-Fi, long enough for the link to drop once: when a
+     * file fails, the connection is made again and the upload carries on from that file,
+     * passing over what already arrived whole. It gives up after [MAX_RETRIES] failures in
+     * a row.
+     *
      * @param onProgress (bytes sent, bytes in all), often: throttle what it draws
      */
     fun upload(context: Context, folder: File, onProgress: (Long, Long) -> Unit = { _, _ -> }): Result<String> = runCatching {
         val c = config(context)
         val files = folder.walkTopDown().filter { it.isFile }.toList()
         val total = files.sumOf { it.length() }
-        var sent = 0L
-        session(context, c) { share ->
-            val root = "${c.folder}\\${folder.name}"
-            mkdirs(share, root)
-            onProgress(0, total)
-            val buffer = ByteArray(1 shl 16)
-            for (f in files) {
-                val rel = f.relativeTo(folder).path.replace('/', '\\')
-                rel.substringBeforeLast('\\', "").takeIf { it.isNotEmpty() }?.let { mkdirs(share, "$root\\$it") }
-                share.openFile(
-                    "$root\\$rel",
-                    setOf(AccessMask.GENERIC_WRITE),
-                    null,
-                    SMB2ShareAccess.ALL,
-                    SMB2CreateDisposition.FILE_OVERWRITE_IF,
-                    null,
-                ).use { remote ->
-                    remote.outputStream.use { out ->
-                        f.inputStream().use { input ->
-                            while (true) {
-                                val n = input.read(buffer)
-                                if (n < 0) break
-                                out.write(buffer, 0, n)
-                                sent += n
-                                onProgress(sent, total)
+        val root = "${c.folder}\\${folder.name}"
+        var index = 0
+        var done = 0L
+        var failures = 0
+        onProgress(0, total)
+        while (index < files.size) {
+            try {
+                session(context, c) { share ->
+                    mkdirs(share, root)
+                    val buffer = ByteArray(1 shl 16)
+                    while (index < files.size) {
+                        val f = files[index]
+                        val rel = f.relativeTo(folder).path.replace('/', '\\')
+                        val path = "$root\\$rel"
+                        rel.substringBeforeLast('\\', "").takeIf { it.isNotEmpty() }?.let { mkdirs(share, "$root\\$it") }
+                        if (failures == 0 || remoteSize(share, path) != f.length()) {
+                            share.openFile(
+                                path,
+                                setOf(AccessMask.GENERIC_WRITE),
+                                null,
+                                SMB2ShareAccess.ALL,
+                                SMB2CreateDisposition.FILE_OVERWRITE_IF,
+                                null,
+                            ).use { remote ->
+                                remote.outputStream.use { out ->
+                                    f.inputStream().use { input ->
+                                        var sent = 0L
+                                        while (true) {
+                                            val n = input.read(buffer)
+                                            if (n < 0) break
+                                            out.write(buffer, 0, n)
+                                            sent += n
+                                            onProgress(done + sent, total)
+                                        }
+                                    }
+                                }
                             }
                         }
+                        done += f.length()
+                        index++
+                        failures = 0
+                        onProgress(done, total)
                     }
                 }
+            } catch (e: Exception) {
+                if (e is InterruptedException) throw e
+                failures++
+                Log.w(TAG, "upload: ${files.getOrNull(index)?.name} failed ($failures/$MAX_RETRIES)", e)
+                if (failures > MAX_RETRIES) throw IllegalStateException(describe(e), e)
+                Thread.sleep(RETRY_PAUSE_MS * failures)
             }
-            onProgress(total, total)
-            "\\\\${c.host}\\${c.share}\\$root (${files.size} files, ${"%.1f".format(total / 1e6)} MB)"
         }
+        onProgress(total, total)
+        "\\\\${c.host}\\${c.share}\\$root (${files.size} files, ${"%.1f".format(total / 1e6)} MB)"
     }
+
+    /** What went wrong, down to the cause: smbj wraps the reason (a reset, a timeout) a level or two in. */
+    fun describe(t: Throwable): String {
+        val chain = generateSequence(t) { it.cause?.takeIf { c -> c !== it } }.take(5).toList()
+        val parts = chain.map { e -> e.javaClass.simpleName + (e.message?.takeIf { it.isNotBlank() }?.let { ": ${it.take(160)}" } ?: "") }
+        return parts.distinct().joinToString("\n← ")
+    }
+
+    private fun remoteSize(share: DiskShare, path: String): Long = runCatching {
+        if (!share.fileExists(path)) -1L else share.getFileInformation(path).standardInformation.endOfFile
+    }.getOrDefault(-1L)
 
     private fun mkdirs(share: DiskShare, path: String) {
         var cur = ""
@@ -139,21 +178,34 @@ object NetworkStorage {
         val client = SMBClient(
             SmbConfig.builder()
                 .withSecurityProvider(BCSecurityProvider())
-                .withTimeout(30, TimeUnit.SECONDS)
-                .withSoTimeout(60, TimeUnit.SECONDS)
+                .withTimeout(2, TimeUnit.MINUTES)
+                .withSoTimeout(3, TimeUnit.MINUTES)
                 .build()
         )
         val pw = password(context)
         try {
-            client.connect(c.host).use { connection ->
+            val connection = client.connect(c.host)
+            try {
                 val session = connection.authenticate(AuthenticationContext(c.user, pw, c.domain.ifEmpty { null }))
-                (session.connectShare(c.share) as DiskShare).use { share -> return block(share) }
+                val share = session.connectShare(c.share) as DiskShare
+                try {
+                    return block(share)
+                } finally {
+                    // After a dropped link closing fails too, and must not hide why it dropped.
+                    runCatching { share.close() }
+                }
+            } finally {
+                runCatching { connection.close() }
             }
         } finally {
             pw.fill('\u0000')
-            client.close()
+            runCatching { client.close() }
         }
     }
+
+    private const val TAG = "NetworkStorage"
+    private const val MAX_RETRIES = 3
+    private const val RETRY_PAUSE_MS = 3000L
 
     // ---- password at rest -----------------------------------------------------------
 

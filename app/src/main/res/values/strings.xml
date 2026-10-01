@@ -94,4 +94,21 @@
     <string name="progress_eta_fmt">경과 %1$s · 남은 시간 약 %2$s</string>
     <string name="progress_eta_pending">경과 %1$s · 남은 시간 계산 중…</string>
     <string name="scene_saved_fmt">%1$s: %2$d captures, WB R %3$.2f B %4$.2f from %5$d frames</string>
+    <string name="scenes_title">씬</string>
+    <string name="storage_pill">스토리지</string>
+    <string name="scene_more">씬 메뉴</string>
+    <string name="more_mark">⋯</string>
+    <string name="scene_minutes_fmt">%1$d분</string>
+    <string name="kind_single_fmt">단일 %1$d</string>
+    <string name="kind_hdr_fmt">HDR %1$d</string>
+    <string name="kind_compare_fmt">비교 %1$d</string>
+    <string name="kind_depth_fmt">Depth %1$d</string>
+    <string name="scene_wb_fmt">WB  R %1$.2f  B %2$.2f · %3$s</string>
+    <string name="scene_wb_auto_fmt">자동 %1$d장</string>
+    <string name="scene_wb_global">기본값</string>
+    <string name="scene_uploaded_fmt">✓ 업로드됨 %1$s</string>
+    <string name="scene_not_uploaded">업로드 안 됨</string>
+    <string name="scene_set_cover">대표 이미지로 지정</string>
+    <string name="scene_open_capture">열기</string>
+    <string name="strip_more_fmt">+%1$d</string>
 </resources>

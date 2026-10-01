@@ -62,32 +62,6 @@ object CaptureProcessing {
         return mask.size
     }
 
-    /** The lit half's merge minus the ambient half's, at the lit half's reference exposure. */
-    fun active(lit: TiffReader.FloatRaw, litMeta: JSONObject?, ambient: TiffReader.FloatRaw, ambientMeta: JSONObject?, source: JaiCamera.Source): FloatArray {
-        val key = "${source.label.lowercase()}_reference_us"
-        val refLit = litMeta?.optJSONObject("hdr")?.optDouble(key) ?: Double.NaN
-        val refAmbient = ambientMeta?.optJSONObject("hdr")?.optDouble(key) ?: Double.NaN
-        val k = if (refLit.isFinite() && refAmbient.isFinite() && refAmbient > 0) (refLit / refAmbient).toFloat() else 1f
-        return FloatArray(lit.samples.size) { lit.samples[it] - ambient.samples[it] * k }
-    }
-
-    /**
-     * The Helios's x, y, z in millimetres, interleaved, NaN where it measured nothing;
-     * and its intensity plane as recorded. Null when the capture has no depth.
-     */
-    fun depth(context: Context, entry: CaptureEntry, metadata: JSONObject?): Pair<TiffReader.FloatRaw, TiffReader.Raw?>? {
-        val sample = depthSample(context, entry, metadata) ?: return null
-        val w = sample.width
-        val h = sample.height
-        val xyz = FloatArray(w * h * 3)
-        for (i in 0 until w * h) {
-            val ok = sample.valid(i)
-            for (c in 0 until 3) xyz[i * 3 + c] = if (ok) sample.mm(c, i).toFloat() else Float.NaN
-        }
-        val intensity = entry.depthTiffs["intensity"]?.let { CaptureLibrary.readTiff(context, it) }
-        return TiffReader.FloatRaw(xyz, w, h, null) to intensity
-    }
-
     /** The saved x, y, z planes with the scale and offset that turn them into millimetres. */
     fun depthSample(context: Context, entry: CaptureEntry, metadata: JSONObject?): DepthSample? {
         val planes = listOf("x", "y", "z").map { p -> entry.depthTiffs[p]?.let { CaptureLibrary.readTiff(context, it) } ?: return null }

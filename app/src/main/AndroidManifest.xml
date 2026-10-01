@@ -31,6 +31,12 @@
             android:theme="@style/Theme.Mobile_jai.NoActionBar" />
 
         <activity
+            android:name=".SceneListActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Mobile_jai.NoActionBar" />
+
+        <activity
             android:name=".ViewerActivity"
             android:exported="false"
             android:screenOrientation="portrait"

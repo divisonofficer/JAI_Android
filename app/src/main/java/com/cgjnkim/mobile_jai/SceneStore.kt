@@ -22,6 +22,8 @@ import java.util.UUID
  *
  * @param wb the scene's balance; [wbFrames] is how many of its captures it was estimated
  *   from, 0 when none were bright enough and the global balance stands in
+ * @param cover the capture chosen to stand for the scene; null for the automatic choice
+ * @param uploaded when the scene last went to the network storage, and where
  */
 data class Scene(
     val id: String,
@@ -30,6 +32,9 @@ data class Scene(
     val wb: RawDisplay.Gains,
     val wbFrames: Int,
     val created: String,
+    val cover: String? = null,
+    val uploaded: String? = null,
+    val uploadedTo: String? = null,
 )
 
 /**
@@ -90,6 +95,26 @@ object SceneStore {
         created = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date()),
     )
 
+    /** The scene's balance estimated again from its captures, or the global one when none qualifies. */
+    fun rebalance(context: Context, s: Scene, all: List<CaptureEntry>): Scene {
+        val est = estimateBalance(context, s.stamps, all)
+        return if (est != null) s.copy(wb = est.first, wbFrames = est.second) else s.copy(wb = RawDisplay.Gains.GLOBAL, wbFrames = 0)
+    }
+
+    /** Applies [change] to the scene [id] and saves; returns the scene as changed. */
+    fun update(context: Context, id: String, change: (Scene) -> Scene): Scene? {
+        val next = load(context).map { if (it.id == id) change(it) else it }
+        save(context, next)
+        return next.firstOrNull { it.id == id }
+    }
+
+    /**
+     * The capture that stands for the scene: the one chosen, else its first HDR burst or
+     * flash comparison (the best picture a set-up gets), else its first capture.
+     */
+    fun coverOf(scene: Scene, items: List<CaptureEntry>): CaptureEntry? =
+        items.firstOrNull { it.stamp == scene.cover } ?: items.firstOrNull { it.isHdr } ?: items.firstOrNull()
+
     /**
      * Every stamp that has to go with [stamps]: a flash comparison's two halves are one
      * scene's or none's.
@@ -143,6 +168,9 @@ object SceneStore {
             put("frames", s.wbFrames)
             put("method", if (s.wbFrames > 0) "median of per-frame gray world over the scene's bright frames" else "global default")
         })
+        s.cover?.let { put("cover", it) }
+        s.uploaded?.let { put("uploaded", it) }
+        s.uploadedTo?.let { put("uploaded_to", it) }
     }
 
     private fun parse(root: JSONObject): List<Scene> {
@@ -159,6 +187,9 @@ object SceneStore {
                 else RawDisplay.Gains.GLOBAL,
                 wbFrames = wb?.optInt("frames") ?: 0,
                 created = o.optString("created"),
+                cover = o.optString("cover").takeIf { it.isNotEmpty() },
+                uploaded = o.optString("uploaded").takeIf { it.isNotEmpty() },
+                uploadedTo = o.optString("uploaded_to").takeIf { it.isNotEmpty() },
             )
         }
     }

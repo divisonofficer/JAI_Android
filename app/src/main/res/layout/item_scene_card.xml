@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    One scene at a glance: its cover picture, name, when it was shot and for how long,
+    what it is made of, its white balance and whether it went to the storage; then a
+    strip of its captures and the two ways out.
+-->
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginVertical="6dp"
+    android:background="@drawable/scene_card"
+    android:padding="14dp">
+
+    <ImageView
+        android:id="@+id/cover"
+        android:layout_width="108dp"
+        android:layout_height="108dp"
+        android:background="@drawable/thumb_round"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/cover_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="5dp"
+        android:background="@drawable/mode_pill"
+        android:paddingHorizontal="7dp"
+        android:paddingVertical="2dp"
+        android:textColor="@android:color/white"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="@id/cover"
+        app:layout_constraintStart_toStartOf="@id/cover"
+        tools:text="12" />
+
+    <TextView
+        android:id="@+id/more"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:background="@drawable/round_button"
+        android:contentDescription="@string/scene_more"
+        android:gravity="center"
+        android:text="@string/more_mark"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="6dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@android:color/white"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toStartOf="@id/more"
+        app:layout_constraintStart_toEndOf="@id/cover"
+        app:layout_constraintTop_toTopOf="@id/cover"
+        tools:text="desk_A" />
+
+    <TextView
+        android:id="@+id/time"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:fontFamily="monospace"
+        android:textColor="@color/camera_quiet"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toStartOf="@id/more"
+        app:layout_constraintStart_toStartOf="@id/name"
+        app:layout_constraintTop_toBottomOf="@id/name"
+        tools:text="10-01 14:20 – 14:48 · 28분" />
+
+    <TextView
+        android:id="@+id/wb"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="@id/name"
+        app:layout_constraintTop_toBottomOf="@id/time"
+        tools:text="WB  R 1.62  B 2.57 · 자동 5장" />
+
+    <TextView
+        android:id="@+id/uploaded"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:ellipsize="middle"
+        android:maxLines="1"
+        android:textColor="@color/camera_ok"
+        android:textSize="12sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="@id/name"
+        app:layout_constraintTop_toBottomOf="@id/wb"
+        tools:text="✓ 업로드됨 10-01 15:02" />
+
+    <androidx.constraintlayout.widget.Barrier
+        android:id="@+id/top_bottom"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:barrierDirection="bottom"
+        app:constraint_referenced_ids="cover,uploaded" />
+
+    <!-- What the scene is made of: one pill per kind of capture. -->
+    <LinearLayout
+        android:id="@+id/kinds"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/top_bottom" />
+
+    <!-- Its captures, oldest first; filled in code to the card's width. -->
+    <LinearLayout
+        android:id="@+id/strip"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/kinds" />
+
+    <TextView
+        android:id="@+id/zip"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="5dp"
+        android:background="@drawable/mode_pill"
+        android:gravity="center"
+        android:text="@string/scene_export_zip"
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toStartOf="@id/upload"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/strip" />
+
+    <TextView
+        android:id="@+id/upload"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_marginStart="5dp"
+        android:background="@drawable/action_pill"
+        android:gravity="center"
+        android:text="@string/scene_export_upload"
+        android:textColor="@android:color/black"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@id/zip"
+        app:layout_constraintTop_toTopOf="@id/zip" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
