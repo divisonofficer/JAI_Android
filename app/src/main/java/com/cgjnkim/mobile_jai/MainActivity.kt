@@ -913,7 +913,7 @@ class MainActivity : AppCompatActivity() {
         DefectRepair.mend(camera.info?.serial, Source.RGB, image.samples, image.side, image.side)
         val side = image.side / 2
         val pixels = IntArray(side * side)
-        val gains = RawDisplay.grayWorldGains(image.samples, image.side, image.side)
+        val gains = RawDisplay.Gains.GLOBAL
         RawDisplay.renderBayer(image.samples, image.side, image.side, gains, pixels, step = 2)
         val bitmap = Bitmap.createBitmap(pixels, side, side, Bitmap.Config.ARGB_8888)
         main.post { binding.lastCapture.setImageBitmap(bitmap) }

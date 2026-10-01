@@ -30,7 +30,7 @@
     <string name="delete">Delete</string>
     <string name="delete_title">Delete capture?</string>
     <string name="delete_message">%1$s: all %2$d files (RGB and NIR TIFFs, metadata, preview) will be removed.</string>
-    <string name="wb_auto">WB auto</string>
+    <string name="wb_auto">WB global</string>
     <string name="wb_raw">WB 1:1:1</string>
     <string name="viewer_no_metadata">no metadata file</string>
     <string name="viewer_wb_fmt">display balance %1$s (files stay 1:1:1)</string>

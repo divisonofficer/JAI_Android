@@ -101,7 +101,7 @@ object BurstStore {
             written += name
             if (source == JaiCamera.Source.RGB) {
                 rgbRadiance = radiance
-                hdrGains[source] = RawDisplay.grayWorldGains(radiance, side, side)
+                hdrGains[source] = RawDisplay.Gains.GLOBAL
             }
         }
 

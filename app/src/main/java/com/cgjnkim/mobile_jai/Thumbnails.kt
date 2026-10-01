@@ -35,7 +35,7 @@ object Thumbnails {
             DefectRepair.mend(serial(context, entry), JaiCamera.Source.RGB, raw.samples, raw.width, raw.height)
             val side = raw.width / 2
             val pixels = IntArray(side * (raw.height / 2))
-            val gains = RawDisplay.grayWorldGains(raw.samples, raw.width, raw.height)
+            val gains = RawDisplay.Gains.GLOBAL
             RawDisplay.renderBayer(raw.samples, raw.width, raw.height, gains, pixels, step = 2)
             val full = Bitmap.createBitmap(pixels, side, raw.height / 2, Bitmap.Config.ARGB_8888)
             val small = Bitmap.createScaledBitmap(full, SIZE, SIZE * full.height / full.width, true)
@@ -57,7 +57,7 @@ object Thumbnails {
             val w = raw.width / 2
             val h = raw.height / 2
             val pixels = IntArray(w * h)
-            val gains = RawDisplay.grayWorldGains(raw.samples, raw.width, raw.height)
+            val gains = RawDisplay.Gains.GLOBAL
             RawDisplay.renderHdrBayer(raw.samples, raw.width, raw.height, gains, pixels, step = 2)
             val full = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
             val small = Bitmap.createScaledBitmap(full, SIZE, SIZE * h / w, true)

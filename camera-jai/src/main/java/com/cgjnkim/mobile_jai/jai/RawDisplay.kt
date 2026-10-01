@@ -33,6 +33,18 @@ object RawDisplay {
 
         companion object {
             val UNITY = Gains(1f, 1f, 1f)
+
+            /**
+             * The one balance every picture of this camera is shown with, so that captures,
+             * brackets and the halves of a comparison can be compared by eye. Per-frame gray
+             * world could not do that: it moved with the scene, and on the dark ambient half
+             * of a comparison it read noise and swung to R x9, B x11.
+             *
+             * The median of gray-world gains over the 16 well-exposed room-lit captures
+             * taken 2026-09-30 (fluorescent lab light), whose own spread was R 1.55-1.64,
+             * B 2.36-2.58. Display only, like every balance here: files stay 1:1:1.
+             */
+            val GLOBAL = Gains(1.62f, 1f, 2.57f)
         }
     }
 

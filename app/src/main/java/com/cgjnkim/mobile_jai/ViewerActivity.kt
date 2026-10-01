@@ -189,7 +189,7 @@ class ViewerActivity : AppCompatActivity() {
                     ?.also { mend(serial, Source.RGB, it) }
                 val nir = entry.nirTiff?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
                     ?.also { mend(serial, Source.NIR, it) }
-                val gains = rgb?.let { RawDisplay.grayWorldGains(it.samples, it.width, it.height) } ?: RawDisplay.Gains.UNITY
+                val gains = RawDisplay.Gains.GLOBAL
                 val depth = entry.depthTiffs["z"]?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
                 Loaded(entry.stamp, rgb, nir, gains, metadata, depth = depth)
             }
@@ -220,7 +220,7 @@ class ViewerActivity : AppCompatActivity() {
             val uri = entry.hdrTiffs[s.name.lowercase()] ?: continue
             runCatching { CaptureLibrary.readFloatTiff(this, uri) }.getOrNull()?.let { mend(serial, s, it); hdr[s] = it }
         }
-        val gains = hdr[Source.RGB]?.let { RawDisplay.grayWorldGains(it.samples, it.width, it.height) } ?: RawDisplay.Gains.UNITY
+        val gains = RawDisplay.Gains.GLOBAL
         val brackets = Source.values().mapNotNull { s -> entry.bracketTiffs[s.name.lowercase()]?.let { s to it } }.toMap()
         val depth = entry.depthTiffs["z"]?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
         val loaded = Loaded(entry.stamp, null, null, gains, metadata, hdr, brackets, depth).also {
@@ -467,8 +467,8 @@ class ViewerActivity : AppCompatActivity() {
             val diff = activeMap(data, src) ?: return null
             val side = data.hdr[src]?.width ?: return null
             val raw = TiffReader.FloatRaw(diff, side, diff.size / side, null)
-            // Balanced on the added light itself: its colour is the lights', not the room's.
-            val gains = if (src == Source.RGB && wb) RawDisplay.grayWorldGains(diff, raw.width, raw.height) else RawDisplay.Gains.UNITY
+            // The same balance as the halves, so the lights' own colour shows as it is.
+            val gains = if (src == Source.RGB && wb) RawDisplay.Gains.GLOBAL else RawDisplay.Gains.UNITY
             return drawHdr(raw, src, gains, step, evMilli)
         }
         if (frame == HDR_FRAME) return drawHdr(data.hdr[src], src, if (wb) data.gains else RawDisplay.Gains.UNITY, step, evMilli)
@@ -481,7 +481,7 @@ class ViewerActivity : AppCompatActivity() {
                 }
             }
         }
-        val gains = if (src == Source.RGB && wb) RawDisplay.grayWorldGains(raw.samples, raw.width, raw.height) else RawDisplay.Gains.UNITY
+        val gains = if (src == Source.RGB && wb) RawDisplay.Gains.GLOBAL else RawDisplay.Gains.UNITY
         return draw(raw, src, wb, gains, step)
     }
 
@@ -579,7 +579,7 @@ class ViewerActivity : AppCompatActivity() {
         val uri = (if (src == Source.RGB) entry.rgbTiff else entry.nirTiff) ?: return null
         val raw = runCatching { CaptureLibrary.readTiff(this, uri) }.getOrNull() ?: return null
         mend(DefectRepair.serialOf(CaptureLibrary.metadata(this, entry)), src, raw)
-        val gains = if (src == Source.RGB && wb) RawDisplay.grayWorldGains(raw.samples, raw.width, raw.height)
+        val gains = if (src == Source.RGB && wb) RawDisplay.Gains.GLOBAL
         else RawDisplay.Gains.UNITY
         return draw(raw, src, wb, gains, step = 2)
     }
@@ -588,7 +588,7 @@ class ViewerActivity : AppCompatActivity() {
         val uri = entry.hdrTiffs[src.name.lowercase()] ?: return null
         val raw = runCatching { CaptureLibrary.readFloatTiff(this, uri) }.getOrNull() ?: return null
         mend(DefectRepair.serialOf(CaptureLibrary.metadata(this, entry)), src, raw)
-        val gains = if (src == Source.RGB && wb) RawDisplay.grayWorldGains(raw.samples, raw.width, raw.height)
+        val gains = if (src == Source.RGB && wb) RawDisplay.Gains.GLOBAL
         else RawDisplay.Gains.UNITY
         return drawHdr(raw, src, gains, step = 2, ev = evMilli)
     }

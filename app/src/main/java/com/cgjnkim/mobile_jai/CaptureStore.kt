@@ -228,7 +228,7 @@ object CaptureStore {
         // A copy: the samples are the ones the TIFF was written from.
         val samples = image.samples.copyOf()
         DefectRepair.mend(serial, JaiCamera.Source.RGB, samples, image.side, image.side)
-        val gains = RawDisplay.grayWorldGains(samples, image.side, image.side)
+        val gains = RawDisplay.Gains.GLOBAL
         RawDisplay.renderBayer(samples, image.side, image.side, gains, pixels, step = 2)
         val bitmap = Bitmap.createBitmap(pixels, side, side, Bitmap.Config.ARGB_8888)
         try {
