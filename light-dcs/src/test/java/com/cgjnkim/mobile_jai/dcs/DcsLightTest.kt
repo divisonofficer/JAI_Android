@@ -39,4 +39,82 @@ class DcsLightTest {
         assertEquals("10.121.136.254", hosts.last())
         assert("10.121.136.179" !in hosts)
     }
+
+    /**
+     * A stand-in controller on loopback that answers like the real one, one datagram per
+     * line, and can be made to "reboot" (back to 0 mA, off) or fall silent.
+     */
+    private class FakeController : AutoCloseable {
+        val socket = java.net.DatagramSocket(java.net.InetSocketAddress("127.0.0.1", DcsLight.PORT))
+        @Volatile var current = 0
+        @Volatile var mode = 0
+        @Volatile var silent = false
+        val commands = java.util.concurrent.CopyOnWriteArrayList<String>()
+        private val thread = Thread {
+            val buf = ByteArray(1024)
+            while (!socket.isClosed) {
+                val p = java.net.DatagramPacket(buf, buf.size)
+                try { socket.receive(p) } catch (_: java.io.IOException) { break }
+                val cmd = String(buf, 0, p.length).trimEnd(';')
+                commands += cmd
+                if (silent) continue
+                fun reply(text: String) {
+                    val b = text.toByteArray()
+                    socket.send(java.net.DatagramPacket(b, b.size, p.socketAddress))
+                }
+                when {
+                    cmd == "*CHANNEL:CONFIGS?" -> reply(
+                        "<channelConfig profile=\"0\">\n<channel id=\"1\" current=\"$current\" mode=\"$mode\" maxCont=\"1000\" maxStrobe=\"5000\" />\n" +
+                            "<info lighthead=\"SL162-850C1,,\" firmware=\"030041_06\" type=\"DCS-103E\" />\n</channelConfig>\r\n"
+                    )
+                    cmd.startsWith("SET:LEVEL:CHANNEL1,") -> {
+                        current = cmd.substringAfter(",").toInt()
+                        reply("INFO: Channel 1 set to $current mA\r\n")
+                        reply("SIG: Channel 1 current limited to 1000 mA\r\n")
+                    }
+                    cmd.startsWith("SET:MODE:CHANNEL1,") -> {
+                        mode = cmd.substringAfter(",").toInt()
+                        reply("INFO: Channel 1 set to mode $mode\r\n")
+                    }
+                    else -> reply("WARNING: Command not found: $cmd\r\n")
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        fun reboot() { current = 0; mode = 0 }
+        override fun close() = socket.close()
+    }
+
+    private val loopback = java.net.InetAddress.getByName("127.0.0.1") as java.net.Inet4Address
+
+    @Test fun flashAfterControllerRebootStillLightsAtTheSetLevel() {
+        FakeController().use { fake ->
+            val light = DcsLight()
+            assert(light.open(loopback, 24, preferred = loopback))
+            light.setLevel(700)
+            fake.reboot() // behind the client's back: 0 mA, off
+            light.setOn()
+            assertEquals(700, fake.current)
+            assertEquals(DcsLight.MODE_CONTINUOUS, fake.mode)
+            light.close()
+            assertEquals(DcsLight.MODE_OFF, fake.mode)
+        }
+    }
+
+    @Test fun checkReportsDriftAndLoss() {
+        FakeController().use { fake ->
+            val light = DcsLight()
+            assert(light.open(loopback, 24, preferred = loopback))
+            light.setLevel(400)
+            var drifted = false
+            assert(light.check { drifted = true })
+            assert(!drifted)
+            fake.reboot()
+            assert(light.check { drifted = true })
+            assert(drifted)
+            fake.silent = true
+            assert(!light.check())
+            assert(!light.isOpen)
+        }
+    }
 }

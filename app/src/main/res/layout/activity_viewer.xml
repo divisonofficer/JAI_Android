@@ -52,6 +52,25 @@
         android:textStyle="bold"
         android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="@id/back"
+        app:layout_constraintEnd_toStartOf="@id/calib"
+        app:layout_constraintTop_toTopOf="@id/back"
+        tools:visibility="visible" />
+
+    <!-- Depth-to-JAI calibration from this capture; only when it has a depth frame. -->
+    <TextView
+        android:id="@+id/calib"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="8dp"
+        android:background="@drawable/mode_pill"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        android:text="@string/calib"
+        android:textColor="@android:color/white"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/back"
         app:layout_constraintEnd_toStartOf="@id/delete"
         app:layout_constraintTop_toTopOf="@id/back"
         tools:visibility="visible" />

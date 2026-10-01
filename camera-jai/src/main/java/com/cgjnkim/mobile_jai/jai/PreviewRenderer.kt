@@ -8,8 +8,9 @@ import kotlin.math.pow
  *
  * A Bayer frame becomes one pixel per 2x2 cell (R, mean of the two Gs, B), so a
  * 1440x1080 RGGB mosaic shows as 720x540 colour -- the same size NIR arrives at when
- * binned 2x2 on the camera, so the two views line up without scaling. Colour is left
- * at the camera's 1:1:1 balance: the preview shows what will be recorded.
+ * binned 2x2 on the camera, so the two views line up without scaling. Colour is balanced
+ * by whatever gains the caller passes -- the app uses [RawDisplay.Gains.GLOBAL], so the
+ * preview looks like the gallery will -- while the frames themselves stay 1:1:1.
  *
  * Linear raw looks dark and flat on a screen, so samples go through a lookup table that
  * takes off the sensor's black level and applies a display gamma.
@@ -25,10 +26,18 @@ object PreviewRenderer {
      * @param out at least `size(frame)` pixels
      * @param clip paint samples at or above full scale in [CLIP_COLOR], for exposing by eye
      */
-    fun render(frame: RawFrame, out: IntArray, clip: Boolean = false) {
+    /**
+     * @param gains white balance for a Bayer frame, applied to the signal above black
+     *   before the display curve; clipping is still judged on the sensor's own samples
+     */
+    fun render(frame: RawFrame, out: IntArray, clip: Boolean = false, gains: RawDisplay.Gains = RawDisplay.Gains.UNITY) {
         val bits = PixelFormats.sampleBits(frame.pixelFormat)
         val lut = lut(bits)
         val full = (1 shl bits) - 1
+        val black = (HdrMerge.BLACK * full / 4095f).toInt()
+        // Gain on what is above black, then back to the LUT's own scale.
+        fun balanced(v: Int, gain: Float): Int =
+            if (gain == 1f) v else (black + ((v - black) * gain).toInt()).coerceIn(0, full)
         val w = frame.width
         val h = frame.height
         val samples: ShortArray? = if (bits == 8) null
@@ -51,7 +60,8 @@ object PreviewRenderer {
                     val g2 = sample(row1 + c)
                     val b = sample(row1 + c + 1)
                     out[o++] = if (clip && (r >= full || g1 >= full || g2 >= full || b >= full)) CLIP_COLOR
-                    else (0xFF shl 24) or (lut[r] shl 16) or (lut[(g1 + g2) ushr 1] shl 8) or lut[b]
+                    else (0xFF shl 24) or (lut[balanced(r, gains.r)] shl 16) or
+                        (lut[balanced((g1 + g2) ushr 1, gains.g)] shl 8) or lut[balanced(b, gains.b)]
                 }
             }
         } else {
@@ -71,11 +81,11 @@ object PreviewRenderer {
      * 90 degrees counter-clockwise (see [Upright]). [out] holds `uprightSide(frame)`
      * squared pixels.
      */
-    fun renderUpright(frame: RawFrame, out: IntArray, clip: Boolean = false) {
+    fun renderUpright(frame: RawFrame, out: IntArray, clip: Boolean = false, gains: RawDisplay.Gains = RawDisplay.Gains.UNITY) {
         val (w, h) = size(frame)
         val side = minOf(w, h)
         val full = scratch.get()!!.let { if (it.size >= w * h) it else IntArray(w * h).also(scratch::set) }
-        render(frame, full, clip)
+        render(frame, full, clip, gains)
         Upright.cropRotate(full, w, (w - side) / 2, (h - side) / 2, side, out)
     }
 

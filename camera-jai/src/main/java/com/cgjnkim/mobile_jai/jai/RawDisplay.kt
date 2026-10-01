@@ -80,6 +80,50 @@ object RawDisplay {
     }
 
     /**
+     * One frame's gray-world gains, or null when the frame says too little to judge colour
+     * by: fewer than [minCells] usable 2x2 cells, or a mean green signal under [minSignal]
+     * counts above black. The dark ambient half of a flash comparison is the case this is
+     * for -- gray world over read noise gave R x9, B x11.
+     */
+    fun grayWorldOrNull(
+        samples: ShortArray,
+        width: Int,
+        height: Int,
+        black: Float = HdrMerge.BLACK,
+        minSignal: Float = 40f,
+        minCells: Int = 10_000,
+    ): Gains? {
+        var r = 0.0
+        var g = 0.0
+        var b = 0.0
+        var n = 0
+        for (y in 0 until height - 1 step 2) {
+            val row0 = y * width
+            val row1 = row0 + width
+            for (x in 0 until width - 1 step 2) {
+                val sr = samples[row0 + x].toInt() and 0xFFFF
+                val sg1 = samples[row0 + x + 1].toInt() and 0xFFFF
+                val sg2 = samples[row1 + x].toInt() and 0xFFFF
+                val sb = samples[row1 + x + 1].toInt() and 0xFFFF
+                if (sr >= CLIP || sg1 >= CLIP || sg2 >= CLIP || sb >= CLIP) continue
+                val cg = (sg1 + sg2) / 2f - black
+                if (cg < DARK) continue
+                r += sr - black; g += cg; b += sb - black
+                n++
+            }
+        }
+        if (n < minCells || r <= 0 || b <= 0 || g / n < minSignal) return null
+        return Gains((g / r).toFloat().coerceIn(0.25f, 8f), 1f, (g / b).toFloat().coerceIn(0.25f, 8f))
+    }
+
+    /** The median of several frames' gains: one balance for a scene. */
+    fun median(gains: List<Gains>): Gains? {
+        if (gains.isEmpty()) return null
+        fun med(v: List<Float>) = v.sorted().let { if (it.size % 2 == 1) it[it.size / 2] else (it[it.size / 2 - 1] + it[it.size / 2]) / 2f }
+        return Gains(med(gains.map { it.r }), 1f, med(gains.map { it.b }))
+    }
+
+    /**
      * Bilinear demosaic of an RGGB mosaic to ARGB, with black level, [gains], a stretch
      * that puts the brightest non-clipped content near white, and display gamma.
      *

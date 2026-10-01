@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The JAI image above the ToF image, both at once, so a pair is picked without
+    switching back and forth; the controls and the fit below.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical"
+    tools:context=".calib.CalibActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/back"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/round_button"
+            android:contentDescription="@string/back"
+            android:gravity="center"
+            android:text="@string/back_mark"
+            android:textColor="@android:color/white"
+            android:textSize="22sp" />
+
+        <!-- Through the captures that have a depth frame: the fit pools them all. -->
+        <TextView
+            android:id="@+id/prev"
+            style="@style/CalibPill"
+            android:layout_marginStart="8dp"
+            android:text="@string/calib_prev" />
+
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:maxLines="1"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            tools:text="09-30 15:53:14 · 2/5" />
+
+        <TextView
+            android:id="@+id/next"
+            style="@style/CalibPill"
+            android:text="@string/calib_next" />
+
+        <TextView
+            android:id="@+id/export"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/mode_pill"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/calib_export"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <com.cgjnkim.mobile_jai.calib.PointPickView
+        android:id="@+id/jai_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1.25" />
+
+    <com.cgjnkim.mobile_jai.calib.PointPickView
+        android:id="@+id/helios_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="4dp"
+        android:layout_weight="0.95" />
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="8dp">
+
+            <TextView
+                android:id="@+id/toggle_jai"
+                style="@style/CalibPill"
+                android:text="@string/calib_jai_nir" />
+
+            <TextView
+                android:id="@+id/toggle_tof"
+                style="@style/CalibPill"
+                android:text="@string/calib_tof_intensity" />
+
+            <TextView
+                android:id="@+id/toggle_overlay"
+                style="@style/CalibPill"
+                android:text="@string/calib_overlay" />
+
+            <TextView
+                android:id="@+id/undo"
+                style="@style/CalibPill"
+                android:text="@string/calib_undo" />
+
+            <TextView
+                android:id="@+id/save_active"
+                style="@style/CalibPill"
+                android:text="@string/calib_save" />
+
+            <TextView
+                android:id="@+id/toggle_robust"
+                style="@style/CalibPill"
+                android:text="@string/calib_robust" />
+
+            <TextView
+                android:id="@+id/exclude_scene"
+                style="@style/CalibPill"
+                android:text="@string/calib_exclude" />
+
+            <TextView
+                android:id="@+id/clear_scene"
+                style="@style/CalibPill"
+                android:text="@string/calib_clear_scene" />
+
+        </LinearLayout>
+
+    </HorizontalScrollView>
+
+    <TextView
+        android:id="@+id/status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:minLines="4"
+        android:paddingHorizontal="12dp"
+        android:paddingBottom="8dp"
+        android:textColor="@color/camera_quiet"
+        android:textSize="11sp"
+        tools:text="this capture 8 · all 23 pairs\nRMS 0.84 px · worst #7 2.1 px · spread 0.31\nfx 1620.4 fy 1615.2 cx 545.0 cy 532.1 k1 -0.081\nt -62.1 18.0 9.2 mm" />
+
+</LinearLayout>

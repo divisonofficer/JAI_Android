@@ -59,6 +59,12 @@ class HeliosCamera : AutoCloseable {
          * illuminator's pulse, not the frame rate, is what the supply cannot carry.
          */
         val exposureTime: String = "Exp88Us",
+        /**
+         * Operating mode set on every open. The single-frequency modes are not offered
+         * at all (see [operatingModes]); this is what a restart or an old setting falls
+         * back to.
+         */
+        val operatingMode: String = "Distance5000mmMultiFreq",
     )
 
     /** The settings a frame was taken at, read back from the camera. */
@@ -176,6 +182,9 @@ class HeliosCamera : AutoCloseable {
     /** The configured integration time, or the longest one this mode has that has not restarted the camera. */
     private fun avoidRestarts() {
         val n = nodes!!
+        if (config.operatingMode in n.availableEntries("Scan3dOperatingMode")) {
+            n.ensureEnum("Scan3dOperatingMode", config.operatingMode)
+        }
         val mode = n.getEnum("Scan3dOperatingMode")
         val allowed = n.availableEntries("ExposureTimeSelector").filter { (mode to it) !in restartingSettings }
         val wanted = config.exposureTime.takeIf { it in allowed } ?: allowed.firstOrNull() ?: return
@@ -284,9 +293,15 @@ class HeliosCamera : AutoCloseable {
 
     // ---- controls ---------------------------------------------------------------------
 
-    /** Operating modes this model offers: each is a range and modulation trade. */
+    /**
+     * Operating modes this model offers, less the single-frequency ones and any that
+     * restarted the camera. On this rig Distance6000mmSingleFreq restarted the camera
+     * at 350 us, and at 88 us its points disagreed with the JAI by 14-27 px RMS in every
+     * one of five captures where the multi-frequency modes managed 2-8 px: a single
+     * modulation frequency wraps, and the depths are not to be trusted.
+     */
     fun operatingModes(): List<String> = synchronized(nodeLock) {
-        requireNodes().availableEntries("Scan3dOperatingMode") - crashingModes
+        requireNodes().availableEntries("Scan3dOperatingMode").filter { !it.contains("SingleFreq") } - crashingModes
     }
 
     /** Integration times the current mode allows, less any that restarted the camera. */

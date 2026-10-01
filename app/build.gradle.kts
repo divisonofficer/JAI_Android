@@ -48,6 +48,8 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.recyclerview)
+    // SMB2/3 client for uploading scene exports to the lab's network storage.
+    implementation(libs.smbj)
     implementation(libs.androidx.core.ktx)
     implementation(libs.material)
     testImplementation(libs.junit)

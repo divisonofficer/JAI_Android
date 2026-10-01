@@ -52,4 +52,37 @@
         app:layout_constraintTop_toTopOf="@id/thumb"
         tools:visibility="visible" />
 
+    <!-- The scene this capture is assigned to, if any. -->
+    <TextView
+        android:id="@+id/scene_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="4dp"
+        android:background="@drawable/mode_pill"
+        android:ellipsize="end"
+        android:maxWidth="80dp"
+        android:maxLines="1"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="2dp"
+        android:textColor="@color/camera_ok"
+        android:textSize="9sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="@id/thumb"
+        app:layout_constraintBottom_toBottomOf="@id/thumb"
+        tools:text="desk A"
+        tools:visibility="visible" />
+
+    <!-- Shown while the cell is part of a multi-selection. -->
+    <View
+        android:id="@+id/selected_overlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@drawable/selection_frame"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/thumb"
+        app:layout_constraintEnd_toEndOf="@id/thumb"
+        app:layout_constraintStart_toStartOf="@id/thumb"
+        app:layout_constraintTop_toTopOf="@id/thumb" />
+
 </androidx.constraintlayout.widget.ConstraintLayout>

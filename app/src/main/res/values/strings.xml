@@ -62,4 +62,36 @@
     <string name="compare_active">ACTIVE</string>
     <string name="compare_active_share_fmt">ACTIVE = LIT − AMBIENT · lights supply %1$.0f%% of the lit light</string>
     <string name="gallery_compare_badge">HDR · CMP</string>
+    <string name="scenes">SCENES</string>
+    <string name="scene_assign">씬 지정</string>
+    <string name="scene_unassign">씬 해제</string>
+    <string name="selection_cancel">Cancel selection</string>
+    <string name="close_mark">✕</string>
+    <string name="selection_count_fmt">%1$d selected</string>
+    <string name="scene_new">+ 새 씬</string>
+    <string name="scene_name_title">씬 이름</string>
+    <string name="scene_choose_title">씬 지정 (%1$d)</string>
+    <string name="scene_row_fmt">%1$s · %2$d · WB R %3$.2f B %4$.2f%5$s</string>
+    <string name="scene_wb_default"> (global)</string>
+    <string name="scenes_empty">씬이 없습니다. 갤러리에서 길게 눌러 끌어 선택한 뒤 \'씬 지정\'으로 만드세요.</string>
+    <string name="scene_export_zip">ZIP 공유</string>
+    <string name="scene_export_upload">스토리지 업로드</string>
+    <string name="scene_rename">이름 변경</string>
+    <string name="scene_rebalance">WB 다시 계산</string>
+    <string name="scene_delete">씬 삭제 (촬영본은 유지)</string>
+    <string name="storage_settings">스토리지 설정</string>
+    <string name="storage_test">연결 테스트</string>
+    <string name="storage_save">저장</string>
+    <string name="storage_password_saved">저장됨 (바꿀 때만 입력)</string>
+    <string name="storage_password">비밀번호</string>
+    <string name="working">작업 중…</string>
+    <string name="export_progress_fmt">%1$s · %2$d / %3$d</string>
+    <string name="upload_progress_fmt">%1$.1f / %2$.1f MB · %3$.1f MB/s</string>
+    <string name="phase_export">씬 내보내기</string>
+    <string name="phase_zip">ZIP 압축</string>
+    <string name="phase_upload">스토리지 업로드</string>
+    <string name="phase_fmt">%1$s (%2$d/%3$d)</string>
+    <string name="progress_eta_fmt">경과 %1$s · 남은 시간 약 %2$s</string>
+    <string name="progress_eta_pending">경과 %1$s · 남은 시간 계산 중…</string>
+    <string name="scene_saved_fmt">%1$s: %2$d captures, WB R %3$.2f B %4$.2f from %5$d frames</string>
 </resources>

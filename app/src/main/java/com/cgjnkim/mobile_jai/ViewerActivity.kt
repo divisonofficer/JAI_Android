@@ -1,5 +1,6 @@
 package com.cgjnkim.mobile_jai
 
+import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.Handler
@@ -9,6 +10,11 @@ import android.widget.ImageView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.cgjnkim.mobile_jai.calib.CalibActivity
+import com.cgjnkim.mobile_jai.calib.CalibStore
+import com.cgjnkim.mobile_jai.calib.DepthProjection
+import com.cgjnkim.mobile_jai.calib.DepthSample
+import com.cgjnkim.mobile_jai.helios.Registration
 import com.cgjnkim.mobile_jai.databinding.ActivityViewerBinding
 import com.cgjnkim.mobile_jai.helios.DepthRenderer
 import com.cgjnkim.mobile_jai.jai.DefectFix
@@ -42,6 +48,14 @@ class ViewerActivity : AppCompatActivity() {
     private var entries: List<CaptureEntry> = emptyList()
     private var index = 0
     private var source = Source.RGB
+
+    /**
+     * DEPTH shown from the JAI rather than the Helios: projected through the active
+     * calibration (see [CalibStore.loadActive]) onto the capture's NIR picture. Tapping
+     * DEPTH again while it is shown switches; only when a calibration has been saved.
+     */
+    private var depthOnJai = false
+    @Volatile private var activeCalib: Pair<String, Registration>? = null
     private var balance = true
 
     /** For an HDR burst: [HDR_FRAME] for the merge, or a bracket's index. */
@@ -73,6 +87,8 @@ class ViewerActivity : AppCompatActivity() {
         /** The Helios's Z counts, when the capture has them. */
         val depth: TiffReader.Raw? = null,
     ) {
+        /** All of the Helios's frame, read when first projected. */
+        var depthSample: DepthSample? = null
         val isHdr get() = hdr.isNotEmpty()
         val bracketCount get() = brackets.values.maxOfOrNull { it.size } ?: 0
 
@@ -114,7 +130,15 @@ class ViewerActivity : AppCompatActivity() {
         binding.delete.setOnClickListener { confirmDelete() }
         binding.sourceRgb.setOnClickListener { changeView(Source.RGB, balance) }
         binding.sourceNir.setOnClickListener { changeView(Source.NIR, balance) }
-        binding.sourceDepth.setOnClickListener { changeView(Source.DEPTH, balance) }
+        binding.sourceDepth.setOnClickListener {
+            if (source == Source.DEPTH && activeCalib != null) depthOnJai = !depthOnJai
+            changeView(Source.DEPTH, balance)
+        }
+        binding.calib.setOnClickListener {
+            entries.getOrNull(index)?.let { e ->
+                startActivity(Intent(this, CalibActivity::class.java).putExtra(CalibActivity.EXTRA_STAMP, e.stamp))
+            }
+        }
         binding.toggleWb.setOnClickListener { changeView(source, !balance) }
         binding.toggleFrame.setOnClickListener { cycleFrame() }
         binding.evMode.setOnClickListener { toggleEv() }
@@ -139,6 +163,21 @@ class ViewerActivity : AppCompatActivity() {
         }
     }
 
+    /** The active calibration may have changed on the calibration screen; a projected view follows it. */
+    override fun onResume() {
+        super.onResume()
+        worker.execute {
+            val calib = CalibStore.loadActive(this)
+            main.post {
+                val changed = calib?.first != activeCalib?.first
+                activeCalib = calib
+                if (calib == null) depthOnJai = false
+                showModes()
+                if (changed && source == Source.DEPTH && loaded != null) render(quickFirst = false)
+            }
+        }
+    }
+
     override fun onDestroy() {
         worker.shutdownNow()
         peekWorker.shutdownNow()
@@ -147,7 +186,8 @@ class ViewerActivity : AppCompatActivity() {
 
     /** The view settings a picture was rendered under; a peek from other settings is stale. */
     private fun viewKey(src: Source = source, wb: Boolean = balance) =
-        "$src/${if (src == Source.RGB) wb else false}/${evMilli ?: "tone"}${if (active) "/active" else ""}"
+        "$src/${if (src == Source.RGB) wb else false}/${evMilli ?: "tone"}${if (active) "/active" else ""}" +
+            if (src == Source.DEPTH && depthOnJai) "/onjai/${activeCalib?.first}" else ""
 
     // ---- current capture ------------------------------------------------------------
 
@@ -189,7 +229,7 @@ class ViewerActivity : AppCompatActivity() {
                     ?.also { mend(serial, Source.RGB, it) }
                 val nir = entry.nirTiff?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
                     ?.also { mend(serial, Source.NIR, it) }
-                val gains = RawDisplay.Gains.GLOBAL
+                val gains = SceneStore.gainsFor(this, entry.stamp)
                 val depth = entry.depthTiffs["z"]?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
                 Loaded(entry.stamp, rgb, nir, gains, metadata, depth = depth)
             }
@@ -220,7 +260,7 @@ class ViewerActivity : AppCompatActivity() {
             val uri = entry.hdrTiffs[s.name.lowercase()] ?: continue
             runCatching { CaptureLibrary.readFloatTiff(this, uri) }.getOrNull()?.let { mend(serial, s, it); hdr[s] = it }
         }
-        val gains = RawDisplay.Gains.GLOBAL
+        val gains = SceneStore.gainsFor(this, entry.stamp)
         val brackets = Source.values().mapNotNull { s -> entry.bracketTiffs[s.name.lowercase()]?.let { s to it } }.toMap()
         val depth = entry.depthTiffs["z"]?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
         val loaded = Loaded(entry.stamp, null, null, gains, metadata, hdr, brackets, depth).also {
@@ -461,14 +501,16 @@ class ViewerActivity : AppCompatActivity() {
 
     /** Whatever the view settings say this capture should look like. */
     private fun drawView(data: Loaded, src: Source, wb: Boolean, frame: Int, step: Int): Bitmap? {
-        if (src == Source.DEPTH) return drawDepth(data.depth, data.metadata)
+        if (src == Source.DEPTH) {
+            return if (depthOnJai) drawDepthOnJai(data) else drawDepth(data.depth, data.metadata)
+        }
         if (!data.isHdr) return draw(if (src == Source.RGB) data.rgb else data.nir, src, wb, data.gains, step)
         if (active) {
             val diff = activeMap(data, src) ?: return null
             val side = data.hdr[src]?.width ?: return null
             val raw = TiffReader.FloatRaw(diff, side, diff.size / side, null)
             // The same balance as the halves, so the lights' own colour shows as it is.
-            val gains = if (src == Source.RGB && wb) RawDisplay.Gains.GLOBAL else RawDisplay.Gains.UNITY
+            val gains = if (src == Source.RGB && wb) data.gains else RawDisplay.Gains.UNITY
             return drawHdr(raw, src, gains, step, evMilli)
         }
         if (frame == HDR_FRAME) return drawHdr(data.hdr[src], src, if (wb) data.gains else RawDisplay.Gains.UNITY, step, evMilli)
@@ -481,7 +523,7 @@ class ViewerActivity : AppCompatActivity() {
                 }
             }
         }
-        val gains = if (src == Source.RGB && wb) RawDisplay.Gains.GLOBAL else RawDisplay.Gains.UNITY
+        val gains = if (src == Source.RGB && wb) data.gains else RawDisplay.Gains.UNITY
         return draw(raw, src, wb, gains, step)
     }
 
@@ -531,6 +573,45 @@ class ViewerActivity : AppCompatActivity() {
         return Bitmap.createBitmap(pixels, raw.width, raw.height, Bitmap.Config.ARGB_8888)
     }
 
+    /**
+     * The depth as the JAI sees it: projected through the active calibration onto the
+     * capture's NIR picture (a burst's anchor bracket), coloured near-to-far.
+     */
+    private fun drawDepthOnJai(data: Loaded): Bitmap? {
+        val calib = activeCalib?.second ?: return null
+        val entry = entries.firstOrNull { it.stamp == data.stamp } ?: return null
+        val sample = data.depthSample ?: depthSample(entry, data.metadata)?.also { data.depthSample = it } ?: return null
+        val base = data.nir ?: anchorNir(entry, data) ?: data.rgb
+        val w = calib.imageWidth
+        val h = calib.imageHeight
+        val pixels = IntArray(w * h)
+        if (base != null && base.width == w && base.height == h) {
+            if (base === data.rgb) RawDisplay.renderBayer(base.samples, w, h, data.gains, pixels)
+            else RawDisplay.renderMono(base.samples, w, h, pixels)
+        } else pixels.fill(0xFF000000.toInt())
+        DepthProjection.render(sample, calib, pixels, w, h)
+        return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    private fun depthSample(entry: CaptureEntry, metadata: JSONObject?): DepthSample? {
+        val planes = listOf("x", "y", "z").map { entry.depthTiffs[it] ?: return null }
+            .map { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() ?: return null }
+        val d = metadata?.optJSONObject("depth")
+        val scale = DoubleArray(3) { d?.optJSONArray("scale")?.optDouble(it) ?: DEFAULT_DEPTH_SCALE }
+        val offset = DoubleArray(3) { i -> d?.optJSONArray("offset")?.optDouble(i) ?: if (i < 2) -8192.0 else 0.0 }
+        return DepthSample(planes[0].samples, planes[1].samples, planes[2].samples,
+            planes[0].width, planes[0].height, scale, offset)
+    }
+
+    /** A burst has no single NIR frame; its anchor bracket is the one at the dial's exposure. */
+    private fun anchorNir(entry: CaptureEntry, data: Loaded): TiffReader.Raw? {
+        val anchor = data.metadata?.optJSONObject("hdr")?.optInt("anchor_index", 0) ?: 0
+        val uri = entry.bracketTiffs["nir"]?.let { it.getOrNull(anchor) ?: it.lastOrNull() } ?: return null
+        return synchronized(data.bracketCache) {
+            data.bracketCache.getOrPut("NIR/$anchor") { CaptureLibrary.readTiff(this, uri) }
+        }
+    }
+
     // ---- neighbours -----------------------------------------------------------------
 
     private fun peekView(direction: Int): ImageView = if (direction < 0) binding.peekPrev else binding.peekNext
@@ -572,14 +653,19 @@ class ViewerActivity : AppCompatActivity() {
 
     private fun peekSingle(entry: CaptureEntry, src: Source, wb: Boolean): Bitmap? {
         if (src == Source.DEPTH) {
+            val metadata = CaptureLibrary.metadata(this, entry)
+            if (depthOnJai) {
+                val nir = entry.nirTiff?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
+                return drawDepthOnJai(Loaded(entry.stamp, null, nir, RawDisplay.Gains.UNITY, metadata))
+            }
             val uri = entry.depthTiffs["z"] ?: return null
             val raw = runCatching { CaptureLibrary.readTiff(this, uri) }.getOrNull() ?: return null
-            return drawDepth(raw, CaptureLibrary.metadata(this, entry))
+            return drawDepth(raw, metadata)
         }
         val uri = (if (src == Source.RGB) entry.rgbTiff else entry.nirTiff) ?: return null
         val raw = runCatching { CaptureLibrary.readTiff(this, uri) }.getOrNull() ?: return null
         mend(DefectRepair.serialOf(CaptureLibrary.metadata(this, entry)), src, raw)
-        val gains = if (src == Source.RGB && wb) RawDisplay.Gains.GLOBAL
+        val gains = if (src == Source.RGB && wb) SceneStore.gainsFor(this, entry.stamp)
         else RawDisplay.Gains.UNITY
         return draw(raw, src, wb, gains, step = 2)
     }
@@ -588,7 +674,7 @@ class ViewerActivity : AppCompatActivity() {
         val uri = entry.hdrTiffs[src.name.lowercase()] ?: return null
         val raw = runCatching { CaptureLibrary.readFloatTiff(this, uri) }.getOrNull() ?: return null
         mend(DefectRepair.serialOf(CaptureLibrary.metadata(this, entry)), src, raw)
-        val gains = if (src == Source.RGB && wb) RawDisplay.Gains.GLOBAL
+        val gains = if (src == Source.RGB && wb) SceneStore.gainsFor(this, entry.stamp)
         else RawDisplay.Gains.UNITY
         return drawHdr(raw, src, gains, step = 2, ev = evMilli)
     }
@@ -653,6 +739,11 @@ class ViewerActivity : AppCompatActivity() {
         binding.sourceRgb.setTextColor(if (source == Source.RGB) accent else white)
         binding.sourceNir.setTextColor(if (source == Source.NIR) accent else white)
         binding.sourceDepth.setTextColor(if (source == Source.DEPTH) accent else white)
+        binding.sourceDepth.setText(
+            if (source == Source.DEPTH && depthOnJai && activeCalib != null) R.string.calib_depth_on_jai else R.string.source_depth
+        )
+        binding.calib.visibility =
+            if (entries.getOrNull(index)?.depthTiffs?.isNotEmpty() == true) View.VISIBLE else View.GONE
         binding.sourceDepth.visibility =
             if (entries.getOrNull(index)?.depthTiffs?.isNotEmpty() == true) View.VISIBLE else View.GONE
         binding.toggleWb.setText(if (balance) R.string.wb_auto else R.string.wb_raw)

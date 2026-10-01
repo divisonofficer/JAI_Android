@@ -263,6 +263,119 @@ object TiffWriter {
         body.writeTo(out)
     }
 
+    /** Interleaved R, G, B, 16-bit unsigned: an exported, demosaiced frame. */
+    fun writeRgb16(out: OutputStream, rgb: ShortArray, width: Int, height: Int, description: String) {
+        require(rgb.size >= width * height * 3) { "have ${rgb.size} samples, need ${width * height * 3}" }
+        writeDeflatedRgb(out, width, height, description, bytesPerSample = 2, sampleFormat = 1) { raw, y ->
+            val base = y * width * 3
+            for (i in 0 until width * 3) raw.putShort(rgb[base + i])
+        }
+    }
+
+    /** Interleaved R, G, B, 32-bit float: an exported HDR merge, or a point cloud. */
+    fun writeRgbFloat32(out: OutputStream, rgb: FloatArray, width: Int, height: Int, description: String) {
+        require(rgb.size >= width * height * 3) { "have ${rgb.size} samples, need ${width * height * 3}" }
+        writeDeflatedRgb(out, width, height, description, bytesPerSample = 4, sampleFormat = 3) { raw, y ->
+            val base = y * width * 3
+            for (i in 0 until width * 3) raw.putFloat(rgb[base + i])
+        }
+    }
+
+    private const val TAG_PLANAR_CONFIG = 284
+    private const val RGB_ENTRY_COUNT = 12
+
+    /**
+     * Three samples per pixel, chunky (PlanarConfiguration 1), deflated in strips.
+     *
+     * The one layout difference from the single-plane writer: BitsPerSample and
+     * SampleFormat carry one value per sample, three SHORTs that no longer fit in their
+     * directory entries, so they are written out of line with the strip tables.
+     */
+    private inline fun writeDeflatedRgb(
+        out: OutputStream,
+        width: Int,
+        height: Int,
+        description: String,
+        bytesPerSample: Int,
+        sampleFormat: Int,
+        fillRow: (ByteBuffer, Int) -> Unit,
+    ) {
+        val rowBytes = width * 3 * bytesPerSample
+        val strips = (height + ROWS_PER_STRIP - 1) / ROWS_PER_STRIP
+        val body = ByteArrayOutputStream(rowBytes * height / 2)
+        val byteCounts = IntArray(strips)
+        val deflater = Deflater()
+        val raw = ByteBuffer.allocate(rowBytes * ROWS_PER_STRIP).order(ByteOrder.LITTLE_ENDIAN)
+        val packed = ByteArray(rowBytes * ROWS_PER_STRIP + 64)
+        try {
+            for (strip in 0 until strips) {
+                val firstRow = strip * ROWS_PER_STRIP
+                val rows = minOf(ROWS_PER_STRIP, height - firstRow)
+                raw.clear()
+                for (y in firstRow until firstRow + rows) fillRow(raw, y)
+                deflater.reset()
+                deflater.setInput(raw.array(), 0, rows * rowBytes)
+                deflater.finish()
+                val chunk = ByteArrayOutputStream()
+                while (!deflater.finished()) {
+                    val n = deflater.deflate(packed, 0, packed.size)
+                    if (n == 0 && deflater.needsInput()) break
+                    chunk.write(packed, 0, n)
+                }
+                byteCounts[strip] = chunk.size()
+                chunk.writeTo(body)
+            }
+        } finally {
+            deflater.end()
+        }
+
+        val descriptionBytes = description.toByteArray(Charsets.US_ASCII) + 0
+        val descriptionOffset = HEADER_SIZE + 2 + RGB_ENTRY_COUNT * ENTRY_SIZE + 4
+        val descriptionPadded = descriptionBytes.size + descriptionBytes.size % 2
+        val bitsOffset = descriptionOffset + descriptionPadded
+        val formatOffset = bitsOffset + 6
+        val arraysOffset = formatOffset + 6
+        val arrayBytes = if (strips > 1) strips * 4 else 0
+        val dataOffset = arraysOffset + arrayBytes * 2
+
+        val offsets = IntArray(strips)
+        var at = dataOffset
+        for (i in 0 until strips) {
+            offsets[i] = at
+            at += byteCounts[i]
+        }
+
+        val header = ByteBuffer.allocate(dataOffset).order(ByteOrder.LITTLE_ENDIAN)
+        header.putShort(LITTLE_ENDIAN_MAGIC.toShort())
+        header.putShort(TIFF_VERSION.toShort())
+        header.putInt(HEADER_SIZE)
+        header.putShort(RGB_ENTRY_COUNT.toShort())
+        entry(header, TAG_IMAGE_WIDTH, TYPE_LONG, 1, width)
+        entry(header, TAG_IMAGE_LENGTH, TYPE_LONG, 1, height)
+        entry(header, TAG_BITS_PER_SAMPLE, TYPE_SHORT, 3, bitsOffset)
+        shortEntry(header, TAG_COMPRESSION, COMPRESSION_DEFLATE)
+        shortEntry(header, TAG_PHOTOMETRIC, 2)       // RGB
+        entry(header, TAG_IMAGE_DESCRIPTION, TYPE_ASCII, descriptionBytes.size, descriptionOffset)
+        entry(header, TAG_STRIP_OFFSETS, TYPE_LONG, strips, if (strips > 1) arraysOffset else offsets[0])
+        shortEntry(header, TAG_SAMPLES_PER_PIXEL, 3)
+        entry(header, TAG_ROWS_PER_STRIP, TYPE_LONG, 1, ROWS_PER_STRIP)
+        entry(header, TAG_STRIP_BYTE_COUNTS, TYPE_LONG, strips, if (strips > 1) arraysOffset + arrayBytes else byteCounts[0])
+        shortEntry(header, TAG_PLANAR_CONFIG, 1)     // chunky: R, G, B per pixel
+        entry(header, TAG_SAMPLE_FORMAT, TYPE_SHORT, 3, formatOffset)
+        header.putInt(0)
+
+        header.put(descriptionBytes)
+        repeat(descriptionPadded - descriptionBytes.size) { header.put(0.toByte()) }
+        repeat(3) { header.putShort((bytesPerSample * 8).toShort()) }
+        repeat(3) { header.putShort(sampleFormat.toShort()) }
+        if (strips > 1) {
+            for (v in offsets) header.putInt(v)
+            for (v in byteCounts) header.putInt(v)
+        }
+        out.write(header.array())
+        body.writeTo(out)
+    }
+
     private fun entry(buffer: ByteBuffer, tag: Int, type: Int, count: Int, value: Int) {
         buffer.putShort(tag.toShort())
         buffer.putShort(type.toShort())

@@ -40,13 +40,98 @@
         android:id="@+id/count"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginEnd="16dp"
+        android:layout_marginEnd="10dp"
         android:textColor="@color/camera_quiet"
         android:textSize="13sp"
         app:layout_constraintBottom_toBottomOf="@id/back"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintEnd_toStartOf="@id/scenes_button"
         app:layout_constraintTop_toTopOf="@id/back"
         tools:text="12 captures" />
+
+    <!-- Scenes: their list, export, upload, and the network storage settings. -->
+    <TextView
+        android:id="@+id/scenes_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/mode_pill"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="7dp"
+        android:text="@string/scenes"
+        android:textColor="@color/camera_accent"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="@id/back"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@id/back" />
+
+    <!--
+        Replaces the header while cells are selected: long-press a cell and drag across
+        others to select a run of them, tap to add or remove one.
+    -->
+    <LinearLayout
+        android:id="@+id/selection_bar"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@android:color/black"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="8dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="@id/back"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="@id/back"
+        tools:visibility="visible">
+
+        <TextView
+            android:id="@+id/selection_cancel"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/round_button"
+            android:contentDescription="@string/selection_cancel"
+            android:gravity="center"
+            android:text="@string/close_mark"
+            android:textColor="@android:color/white"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/selection_count"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:textColor="@android:color/white"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            tools:text="7 selected" />
+
+        <TextView
+            android:id="@+id/selection_unassign"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/mode_pill"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="7dp"
+            android:text="@string/scene_unassign"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/selection_assign"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/mode_pill"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="7dp"
+            android:text="@string/scene_assign"
+            android:textColor="@color/camera_accent"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/grid"

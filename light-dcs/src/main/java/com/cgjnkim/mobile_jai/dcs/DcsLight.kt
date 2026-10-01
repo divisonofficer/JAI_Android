@@ -135,21 +135,47 @@ class DcsLight : AutoCloseable {
      */
     fun setLevel(ma: Int): Int = synchronized(lock) {
         val i = requireInfo()
+        // Always sent, never skipped as unchanged: a controller that rebooted behind our
+        // back is at 0 mA whatever we last told it, and a command costs 2 ms.
         val target = ma.coerceIn(0, i.maxContinuousMa)
-        if (target != levelMa) {
-            val reply = command("SET:LEVEL:CHANNEL${i.channel},$target")
-            levelMa = LEVEL_REPLY.find(reply)?.groupValues?.get(1)?.toInt() ?: target
-        }
+        val reply = command("SET:LEVEL:CHANNEL${i.channel},$target")
+        levelMa = LEVEL_REPLY.find(reply)?.groupValues?.get(1)?.toInt() ?: target
         levelMa
     }
 
-    /** Lights the flash at [levelMa], in continuous mode. */
+    /**
+     * Lights the flash at [levelMa], in continuous mode. Level and mode are both sent every
+     * time, for the same reason as in [setLevel]: our idea of its state may be stale.
+     */
     fun setOn() = synchronized(lock) {
         val i = requireInfo()
-        if (!isOn) {
-            command("SET:MODE:CHANNEL${i.channel},$MODE_CONTINUOUS")
-            isOn = true
+        setLevel(levelMa)
+        command("SET:MODE:CHANNEL${i.channel},$MODE_CONTINUOUS")
+        isOn = true
+    }
+
+    /**
+     * Asks the controller for its state. Returns false if it did not answer -- unplugged,
+     * rebooting, or stranded off the subnet -- after which the light is closed so that the
+     * caller's reconnect loop takes over. Returns true otherwise, and [onDrift] is called
+     * if what it reports is not what we last set: it rebooted, or someone else drove it.
+     */
+    fun check(onDrift: () -> Unit = {}): Boolean {
+        val c = synchronized(lock) {
+            val i = info ?: return false
+            ask(requireSocket(), listOf(i.address), CONFIGS_WAIT_MS)[i.address]
+                ?.channels?.firstOrNull { it.id == i.channel }
         }
+        if (c == null) {
+            Log.w(TAG, "controller stopped answering")
+            close()
+            return false
+        }
+        if (c.currentMa != levelMa || (c.mode != MODE_OFF) != isOn) {
+            Log.i(TAG, "controller drifted: ${c.currentMa} mA mode ${c.mode}, expected $levelMa mA ${if (isOn) "on" else "off"}")
+            onDrift()
+        }
+        return true
     }
 
     fun setOff() = synchronized(lock) {
@@ -157,6 +183,22 @@ class DcsLight : AutoCloseable {
         // Even when we think it is off: this is the command that must not be skipped.
         command("SET:MODE:CHANNEL${i.channel},$MODE_OFF")
         isOn = false
+    }
+
+    /**
+     * Writes [address] to the controller's EEPROM as its static IP, in place of DHCP, from
+     * its next power-up on. Returns the controller's answer.
+     *
+     * Why: the controller asks for DHCP exactly once, the instant its link comes up, and
+     * falls back to 192.168.0.1 for good if nothing answers. The phone's tether restarts
+     * now and then, and its DHCP server starts a moment after the link, so after any
+     * restart the controller is lost until it is power-cycled. With a static address it is
+     * simply back when the tether is. The catch: if the tether's subnet ever changes, the
+     * controller is unreachable until its reset button is held for 5 s (back to DHCP).
+     */
+    fun setStaticIp(address: Inet4Address): String = synchronized(lock) {
+        requireInfo()
+        command("SET:STATIC:IP,${address.hostAddress}")
     }
 
     /** The controller's own account of every channel, for diagnostics. */

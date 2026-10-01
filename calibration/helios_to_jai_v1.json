@@ -1,0 +1,17 @@
+{
+  "name": "v1",
+  "created": "2026-10-01",
+  "note": "First calibration. Hand-picked pairs from the Distance5000mmMultiFreq captures 20260930_125451_294, 20260930_125743_098, 20260930_155314_252, 20261001_142402_002, 20261001_142549_254: 56 pairs, 51 kept by the robust fit; ToF points by local plane fit. Model f + pose with the principal point at the centre and no distortion: freer models did no better on leave-one-out (7.4-7.7 px) and their k1, k2, centre and t_z wandered between subsets. Leave-one-out median 7.6 px.",
+  "image_frame": "JAI saved image: upright 1080x1080 square",
+  "depth_frame": "Helios camera frame, millimetres (Coord3D_ABCY16 X, Y, Z)",
+  "model": "pinhole, radial k1 k2; u = fx*x'*d + cx with x' = X/Z, d = 1 + k1 r^2 + k2 r^4",
+  "image_width": 1080,
+  "image_height": 1080,
+  "fx": 1753.608374, "fy": 1753.608374, "cx": 540.000000, "cy": 540.000000,
+  "k1": 0.000000, "k2": 0.000000,
+  "R": [0.999987, 0.005127, 0.000484, -0.005123, 0.999955, -0.008041, -0.000525, 0.008038, 0.999968],
+  "t_mm": [-3.694297, 81.866471, -2.094952],
+  "rms_px": 8.354983,
+  "loo_median_px": 7.645370,
+  "pairs": 51
+}

@@ -14,8 +14,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.cgjnkim.mobile_jai.databinding.ActivityMainBinding
 import com.cgjnkim.mobile_jai.dcs.DcsLight
+import com.cgjnkim.mobile_jai.dcs.R as DcsR
 import com.cgjnkim.mobile_jai.helios.DepthRenderer
 import com.cgjnkim.mobile_jai.helios.HeliosCamera
+import com.cgjnkim.mobile_jai.jai.EthernetLink
 import com.cgjnkim.mobile_jai.jai.GigeDiscovery
 import com.cgjnkim.mobile_jai.jai.JaiCamera
 import com.cgjnkim.mobile_jai.jai.JaiCamera.Source
@@ -94,6 +96,8 @@ class MainActivity : AppCompatActivity() {
     private var flash = Flash.OFF
     private var flashLevelMa = DEFAULT_FLASH_MA
     @Volatile private var lightConnecting = false
+    private var lightHintShown = false
+    private var nextLightCheckAt = 0L
     private var nextLightAt = 0L
 
     /** The preview shows the Helios rather than [source]; [source] stays what the JAI dials control. */
@@ -123,6 +127,7 @@ class MainActivity : AppCompatActivity() {
             renderPreview()
             if (!camera.isOpen && !connecting && SystemClock.uptimeMillis() >= nextConnectAt) connect()
             if (!light.isOpen && !lightConnecting && SystemClock.uptimeMillis() >= nextLightAt) connectLight()
+            if (light.isOpen && !capturing && SystemClock.uptimeMillis() >= nextLightCheckAt) checkLight()
             if (!helios.isOpen && !heliosConnecting && SystemClock.uptimeMillis() >= nextHeliosAt) connectHelios()
             main.postDelayed(this, PREVIEW_INTERVAL_MS)
         }
@@ -397,7 +402,8 @@ class MainActivity : AppCompatActivity() {
         // Square and upright: the camera is mounted a quarter turn clockwise.
         val side = PreviewRenderer.uprightSide(frame)
         if (previewPixels.size != side * side) previewPixels = IntArray(side * side)
-        PreviewRenderer.renderUpright(frame, previewPixels, clip)
+        // The same global balance the gallery uses, so the preview looks like what it will show.
+        PreviewRenderer.renderUpright(frame, previewPixels, clip, RawDisplay.Gains.GLOBAL)
 
         var bitmap = previewBitmap
         if (bitmap == null || bitmap.width != side || bitmap.height != side) {
@@ -591,22 +597,77 @@ class MainActivity : AppCompatActivity() {
             ?.let { runCatching { InetAddress.getByName(it) as Inet4Address }.getOrNull() }
         lightWorker.execute {
             val ok = light.open(link.address, link.prefixLength, preferred)
+            var pinned: String? = null
             if (ok) {
                 light.info?.let { prefs.edit().putString("light_address", it.address.hostAddress).apply() }
                 runCatching { syncFlash() }.onFailure { Log.w(TAG, "flash settings", it) }
+                pinned = pinLightAddress()
             }
             main.post {
                 lightConnecting = false
-                if (ok) showMessage("${light.info?.model} · ${light.info?.lighthead}")
-                else nextLightAt = SystemClock.uptimeMillis() + LIGHT_RETRY_MS
+                if (ok) {
+                    lightHintShown = false
+                    showMessage(pinned?.let { getString(DcsR.string.light_pinned_fmt, it) }
+                        ?: "${light.info?.model} · ${light.info?.lighthead}")
+                } else {
+                    nextLightAt = SystemClock.uptimeMillis() + LIGHT_RETRY_MS
+                    // Once per outage, not on every retry.
+                    if (!lightHintShown) showMessage(lightHint(link))
+                    lightHintShown = true
+                }
                 showLight()
                 showDial()
             }
         }
     }
 
+    /**
+     * Makes the address the tether gave the controller its static one, once: the
+     * controller asks for DHCP only at the instant its link comes up, so every tether
+     * restart otherwise strands it on 192.168.0.1 until it is power-cycled (see
+     * [DcsLight.setStaticIp]). Returns the address if it was written just now. On [lightWorker].
+     */
+    private fun pinLightAddress(): String? {
+        val address = light.info?.address?.hostAddress ?: return null
+        if (prefs.getString("light_static_ip", null) == address) return null
+        return runCatching { light.setStaticIp(light.info!!.address) }
+            .onFailure { Log.w(TAG, "static ip", it) }
+            .getOrNull()?.let {
+                Log.i(TAG, "light static ip: ${it.trim()}")
+                prefs.edit().putString("light_static_ip", address).apply()
+                address
+            }
+    }
+
+    /** What to do about a controller that does not answer, given where it was pinned. */
+    private fun lightHint(link: EthernetLink): String {
+        val pinned = prefs.getString("light_static_ip", null)
+            ?.let { runCatching { InetAddress.getByName(it) as Inet4Address }.getOrNull() }
+        return if (pinned != null && !link.contains(pinned)) {
+            getString(DcsR.string.light_subnet_fmt, pinned.hostAddress, "${link.address.hostAddress}/${link.prefixLength}")
+        } else {
+            getString(DcsR.string.light_not_found)
+        }
+    }
+
+    /**
+     * Every few seconds: is the controller still there, and in the state we left it? Over
+     * UDP nothing else would notice it going away, and a controller that power-cycles comes
+     * back at 0 mA and off, which in ALWAYS mode would leave the preview dark.
+     */
+    private fun checkLight() {
+        nextLightCheckAt = SystemClock.uptimeMillis() + LIGHT_CHECK_MS
+        lightWorker.execute {
+            val alive = light.check(onDrift = {
+                runCatching { syncFlash() }.onFailure { Log.w(TAG, "flash resync", it) }
+            })
+            if (!alive) main.post { nextLightAt = 0; showLight() }
+        }
+    }
+
     private fun reconnectLight() {
         if (lightConnecting) return
+        lightHintShown = false
         lightWorker.execute {
             light.close()
             main.post { nextLightAt = 0; showLight() }
@@ -950,6 +1011,7 @@ class MainActivity : AppCompatActivity() {
         const val DEFAULT_RGB_US = 10_000L
         const val DEFAULT_NIR_US = 100_000L
         const val LIGHT_RETRY_MS = 10_000L
+        const val LIGHT_CHECK_MS = 5_000L
         const val HELIOS_RETRY_MS = 5_000L
         const val DEFAULT_FLASH_MA = 300
         const val DEFAULT_MAX_FLASH_MA = 1000

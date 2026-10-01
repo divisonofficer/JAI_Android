@@ -24,7 +24,7 @@ object DepthRenderer {
             View.DEPTH -> {
                 lastRangeMm = renderDepth(frame.plane(2), frame.scale[2], frame.offset[2], out)
             }
-            View.INTENSITY -> renderIntensity(frame, out)
+            View.INTENSITY -> renderIntensity(frame.plane(3), out)
         }
     }
 
@@ -57,9 +57,9 @@ object DepthRenderer {
         return (near * scale + offset) to (far * scale + offset)
     }
 
-    private fun renderIntensity(frame: DepthFrame, out: IntArray) {
-        val n = frame.width * frame.height
-        val y = frame.plane(3)
+    /** ToF intensity -- a live frame's, or a saved `_depth_intensity.tiff` -- as grey with a display gamma. */
+    fun renderIntensity(y: ShortArray, out: IntArray) {
+        val n = y.size
         val hist = IntArray(65536)
         for (v in y) hist[v.toInt() and 0xFFFF]++
         val top = percentile(hist, n * 0.99).coerceAtLeast(1)
@@ -81,7 +81,7 @@ object DepthRenderer {
     }
 
     /** Google's Turbo colormap, near (0) red to far (1) blue, as a polynomial fit. */
-    private fun turbo(x0: Double): Int {
+    fun turbo(x0: Double): Int {
         val x = 1.0 - x0
         val r = 0.13572138 + x * (4.61539260 + x * (-42.66032258 + x * (132.13108234 + x * (-152.94239396 + x * 59.28637943))))
         val g = 0.09140261 + x * (2.19418839 + x * (4.84296658 + x * (-14.18503333 + x * (4.27729857 + x * 2.82956604))))

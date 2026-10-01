@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The depth-to-JAI calibration screen; kept apart so its strings never collide with others' edits. -->
+<resources>
+    <string name="calib">Calib</string>
+    <string name="calib_jai_nir">JAI NIR</string>
+    <string name="calib_jai_rgb">JAI RGB</string>
+    <string name="calib_tof_intensity">ToF I</string>
+    <string name="calib_tof_depth">ToF Z</string>
+    <string name="calib_overlay">Overlay</string>
+    <string name="calib_undo">Undo</string>
+    <string name="calib_export">Export</string>
+    <string name="calib_title_fmt">%1$s · %2$d/%3$d</string>
+    <string name="calib_prev">‹</string>
+    <string name="calib_next">›</string>
+    <string name="calib_clear_scene">Clear scene</string>
+    <string name="calib_robust">Robust</string>
+    <string name="calib_save">Use fit</string>
+    <string name="calib_depth_on_jai">DEPTH→JAI</string>
+    <string name="calib_save_title">Make this the active calibration?</string>
+    <string name="calib_save_message">%1$d pairs, %2$.1f px RMS. The viewer projects depth with the active calibration (now %3$s); it becomes the next version.</string>
+    <string name="calib_saved_fmt">Saved as %1$s: the viewer now projects depth with it</string>
+    <string name="calib_exclude">Exclude scene</string>
+    <string name="calib_include">Include scene</string>
+    <string name="calib_clear_title">Remove this capture\'s pairs?</string>
+    <string name="calib_clear_message">%1$d pairs picked on %2$s are dropped from the fit. Pairs on other captures stay.</string>
+    <string name="calib_no_depth">This capture has no depth frame</string>
+    <string name="calib_no_depth_here">No depth measured there: pick a lit, flat spot</string>
+    <string name="calib_pick_jai">Now tap the same spot in the JAI image</string>
+    <string name="calib_pick_helios">Now tap the same spot in the ToF image</string>
+    <string name="calib_exported_fmt">Wrote %1$s to Documents/MobileJai/calib</string>
+    <string name="calib_hint">Tap a spot in one image, then the same spot in the other. Pinch or double-tap to zoom, long-press a point to remove it.</string>
+</resources>
