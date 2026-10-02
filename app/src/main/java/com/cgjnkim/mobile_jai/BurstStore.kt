@@ -16,8 +16,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStream
 
-/** How a burst is bracketed: [count] frames [ratio] apart, the dial's exposure at [anchorIndex]. */
-data class BurstPlan(val count: Int = 4, val ratio: Double = 8.0, val anchorIndex: Int = 2) {
+/**
+ * How a burst is bracketed: [count] frames [ratio] apart, the dial's exposure at
+ * [anchorIndex]; [settleFrames] frames are let go after each shutter change.
+ */
+data class BurstPlan(val count: Int = 4, val ratio: Double = 8.0, val anchorIndex: Int = 2, val settleFrames: Int = 1) {
 
     /**
      * Each source's bracket around its own dial exposure. With the defaults that is
@@ -28,6 +31,21 @@ data class BurstPlan(val count: Int = 4, val ratio: Double = 8.0, val anchorInde
         dial.mapValues { (_, t) ->
             HdrMerge.bracket(t, count, ratio, anchorIndex, JaiCamera.MIN_EXPOSURE_US, JaiCamera.MAX_EXPOSURE_US)
         }
+
+    companion object {
+        /** Four frames, t/64 to 8t: the most range, about three seconds. */
+        val FULL = BurstPlan()
+
+        /**
+         * Two frames, t/8 then t: the picture as the dial has it, plus three stops of
+         * highlight from a frame an eighth as long. Eight times keeps the hand-over where
+         * the long frame clips at about 480 counts in the short one, well clear of its
+         * noise, while adding as much range as one more frame can. The short frame comes
+         * first and no frame is let go between them -- the camera takes a new shutter
+         * from the next frame it starts -- so the pair is about two frame times apart.
+         */
+        val FAST = BurstPlan(count = 2, ratio = 8.0, anchorIndex = 1, settleFrames = 0)
+    }
 }
 
 /**
@@ -68,6 +86,7 @@ object BurstStore {
         val anchor = plan.anchorIndex.coerceIn(0, burst.lastIndex)
         var rgbRadiance: FloatArray? = null
         val hdrGains = HashMap<JaiCamera.Source, RawDisplay.Gains>()
+        val measured = HashMap<JaiCamera.Source, List<Double?>>()
 
         for (source in JaiCamera.Source.values()) {
             val label = source.label.lowercase()
@@ -89,6 +108,11 @@ object BurstStore {
             // The bracket TIFFs above are written as recorded; the merge is derived, and a
             // hot pixel's fixed offset would otherwise survive into it from every bracket.
             for (image in frames) DefectRepair.mend(device?.serial, source, image.samples, image.side, image.side)
+            // Each step's light ratio as recorded, beside the shutters' ratio: a frame that
+            // was exposed before its shutter took effect shows here.
+            val byExposure = exposures.indices.sortedBy { exposures[it] }
+            measured[source] = byExposure.zipWithNext { a, b -> HdrMerge.measuredRatio(frames[a].samples, frames[b].samples) }
+            android.util.Log.i("BurstStore", "$stamp $label ratios: shutter ${byExposure.zipWithNext { a, b -> "%.2f".format(exposures[b] / exposures[a]) }} measured ${measured[source]?.map { it?.let { r -> "%.2f".format(r) } }}")
             val radiance = HdrMerge.merge(frames.map { it.samples }, exposures, referenceUs = exposures[anchor])
             val side = frames[0].side
             val name = "${stamp}_${label}_hdr.tiff"
@@ -109,7 +133,7 @@ object BurstStore {
 
         val jsonName = "${stamp}.json"
         write(context, files, DATA_PATH, jsonName, "application/json") { out ->
-            out.write(metadata(burst, plan, device, stamp, hdrGains[JaiCamera.Source.RGB], flash, depth, depthDevice, compare).toString(2).toByteArray())
+            out.write(metadata(burst, plan, device, stamp, hdrGains[JaiCamera.Source.RGB], flash, depth, depthDevice, compare, measured).toString(2).toByteArray())
         }
         written += jsonName
 
@@ -134,6 +158,7 @@ object BurstStore {
         depth: HeliosCamera.Capture?,
         depthDevice: GigeDeviceInfo?,
         compare: JSONObject?,
+        measured: Map<JaiCamera.Source, List<Double?>> = emptyMap(),
     ) = JSONObject().apply {
         compare?.let { put("compare", it) }
         put("stamp", stamp)
@@ -162,6 +187,10 @@ object BurstStore {
             put("frames", burst.size)
             put("ratio", plan.ratio)
             put("anchor_index", plan.anchorIndex)
+            put("settle_frames", plan.settleFrames)
+            for ((source, ratios) in measured) {
+                put("${source.label.lowercase()}_measured_ratios", JSONArray(ratios.map { it ?: JSONObject.NULL }))
+            }
             put("black_level", HdrMerge.BLACK)
             put("clip_level", HdrMerge.CLIP)
             put("noise_floor", HdrMerge.NOISE_FLOOR)

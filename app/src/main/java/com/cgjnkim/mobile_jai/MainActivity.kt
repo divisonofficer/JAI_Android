@@ -17,7 +17,6 @@ import com.cgjnkim.mobile_jai.dcs.DcsLight
 import com.cgjnkim.mobile_jai.dcs.R as DcsR
 import com.cgjnkim.mobile_jai.helios.DepthRenderer
 import com.cgjnkim.mobile_jai.helios.HeliosCamera
-import com.cgjnkim.mobile_jai.jai.EthernetLink
 import com.cgjnkim.mobile_jai.jai.GigeDiscovery
 import com.cgjnkim.mobile_jai.jai.JaiCamera
 import com.cgjnkim.mobile_jai.jai.JaiCamera.Source
@@ -79,9 +78,16 @@ class MainActivity : AppCompatActivity() {
     private var dial = Dial.SHUTTER
     private var clip = false
 
+    /** Whether the preview is drawn with the global display balance or the sensor's 1:1:1. */
+    private var previewWb = true
+
     /** The shutter takes a bracket for HDR instead of one pair; see [captureHdr]. */
-    private var hdr = false
-    private val burstPlan = BurstPlan()
+    /** The shutter's HDR mode: off, the full four-frame bracket, or the fast pair. */
+    private enum class Hdr(val plan: BurstPlan?) { OFF(null), FULL(BurstPlan.FULL), FAST(BurstPlan.FAST) }
+
+    private var hdrMode = Hdr.OFF
+    private val hdr get() = hdrMode != Hdr.OFF
+    private val burstPlan get() = hdrMode.plan ?: BurstPlan.FULL
 
     /** With HDR: which lights a flash comparison lights its first bracket with; OFF for none. */
     private enum class Compare(val label: Int, val nir: Boolean, val phone: Boolean) {
@@ -159,7 +165,14 @@ class MainActivity : AppCompatActivity() {
         binding.toggleFlash.setOnClickListener { cycleFlash() }
         binding.chipLight.setOnClickListener { reconnectLight() }
         binding.toggleClip.setOnClickListener { clip = !clip; showModes(); lastRendered = null }
-        hdr = prefs.getBoolean("hdr", false)
+        previewWb = prefs.getBoolean("preview_wb", true)
+        binding.toggleWb.setOnClickListener {
+            previewWb = !previewWb
+            prefs.edit().putBoolean("preview_wb", previewWb).apply()
+            showModes()
+            lastRendered = null
+        }
+        hdrMode = Hdr.values().getOrElse(prefs.getInt("hdr_mode", if (prefs.getBoolean("hdr", false)) 1 else 0)) { Hdr.OFF }
         binding.toggleHdr.setOnClickListener { toggleHdr() }
         compare = Compare.values().getOrElse(prefs.getInt("compare", 0)) { Compare.OFF }
         binding.toggleCompare.setOnClickListener { cycleCompare() }
@@ -402,8 +415,8 @@ class MainActivity : AppCompatActivity() {
         // Square and upright: the camera is mounted a quarter turn clockwise.
         val side = PreviewRenderer.uprightSide(frame)
         if (previewPixels.size != side * side) previewPixels = IntArray(side * side)
-        // The same global balance the gallery uses, so the preview looks like what it will show.
-        PreviewRenderer.renderUpright(frame, previewPixels, clip, RawDisplay.Gains.GLOBAL)
+        // With WB on, the same global balance the gallery uses; off, the sensor as it is.
+        PreviewRenderer.renderUpright(frame, previewPixels, clip, if (previewWb) RawDisplay.Gains.GLOBAL else RawDisplay.Gains.UNITY)
 
         var bitmap = previewBitmap
         if (bitmap == null || bitmap.width != side || bitmap.height != side) {
@@ -480,7 +493,9 @@ class MainActivity : AppCompatActivity() {
             if (showDepth && depthView == DepthRenderer.View.INTENSITY) R.string.source_intensity else R.string.source_depth
         )
         binding.toggleClip.setTextColor(if (clip) accent else quiet)
+        binding.toggleWb.setTextColor(if (previewWb) accent else quiet)
         binding.toggleHdr.setTextColor(if (hdr) accent else quiet)
+        binding.toggleHdr.setText(if (hdrMode == Hdr.FAST) R.string.hdr_fast_label else R.string.hdr_label)
         binding.toggleCompare.visibility = if (hdr) View.VISIBLE else View.GONE
         binding.toggleCompare.setText(compare.label)
         binding.toggleCompare.setTextColor(if (compare != Compare.OFF) accent else quiet)
@@ -494,8 +509,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleHdr() {
-        hdr = !hdr
-        prefs.edit().putBoolean("hdr", hdr).apply()
+        hdrMode = Hdr.values()[(hdrMode.ordinal + 1) % Hdr.values().size]
+        prefs.edit().putInt("hdr_mode", hdrMode.ordinal).apply()
         showModes()
         if (hdr) {
             // What the shutter will now do, in the dial's own terms: the bracket around it.
@@ -597,56 +612,24 @@ class MainActivity : AppCompatActivity() {
             ?.let { runCatching { InetAddress.getByName(it) as Inet4Address }.getOrNull() }
         lightWorker.execute {
             val ok = light.open(link.address, link.prefixLength, preferred)
-            var pinned: String? = null
             if (ok) {
                 light.info?.let { prefs.edit().putString("light_address", it.address.hostAddress).apply() }
                 runCatching { syncFlash() }.onFailure { Log.w(TAG, "flash settings", it) }
-                pinned = pinLightAddress()
             }
             main.post {
                 lightConnecting = false
                 if (ok) {
                     lightHintShown = false
-                    showMessage(pinned?.let { getString(DcsR.string.light_pinned_fmt, it) }
-                        ?: "${light.info?.model} · ${light.info?.lighthead}")
+                    showMessage("${light.info?.model} · ${light.info?.lighthead}")
                 } else {
                     nextLightAt = SystemClock.uptimeMillis() + LIGHT_RETRY_MS
                     // Once per outage, not on every retry.
-                    if (!lightHintShown) showMessage(lightHint(link))
+                    if (!lightHintShown) showMessage(getString(DcsR.string.light_not_found))
                     lightHintShown = true
                 }
                 showLight()
                 showDial()
             }
-        }
-    }
-
-    /**
-     * Makes the address the tether gave the controller its static one, once: the
-     * controller asks for DHCP only at the instant its link comes up, so every tether
-     * restart otherwise strands it on 192.168.0.1 until it is power-cycled (see
-     * [DcsLight.setStaticIp]). Returns the address if it was written just now. On [lightWorker].
-     */
-    private fun pinLightAddress(): String? {
-        val address = light.info?.address?.hostAddress ?: return null
-        if (prefs.getString("light_static_ip", null) == address) return null
-        return runCatching { light.setStaticIp(light.info!!.address) }
-            .onFailure { Log.w(TAG, "static ip", it) }
-            .getOrNull()?.let {
-                Log.i(TAG, "light static ip: ${it.trim()}")
-                prefs.edit().putString("light_static_ip", address).apply()
-                address
-            }
-    }
-
-    /** What to do about a controller that does not answer, given where it was pinned. */
-    private fun lightHint(link: EthernetLink): String {
-        val pinned = prefs.getString("light_static_ip", null)
-            ?.let { runCatching { InetAddress.getByName(it) as Inet4Address }.getOrNull() }
-        return if (pinned != null && !link.contains(pinned)) {
-            getString(DcsR.string.light_subnet_fmt, pinned.hostAddress, "${link.address.hostAddress}/${link.prefixLength}")
-        } else {
-            getString(DcsR.string.light_not_found)
         }
     }
 
@@ -815,6 +798,7 @@ class MainActivity : AppCompatActivity() {
             darkenDepth()
             val result = camera.captureBurst(
                 plan.exposures(dial),
+                settleFrames = plan.settleFrames,
                 onTriggered = ::onTriggered,
                 onStep = { k -> main.post { showMessage(getString(R.string.hdr_progress_fmt, k + 1, plan.count)) } },
             )
@@ -887,6 +871,7 @@ class MainActivity : AppCompatActivity() {
                 darkenDepth()
                 val result = camera.captureBurst(
                     exposures,
+                    settleFrames = plan.settleFrames,
                     onTriggered = triggered,
                     onStep = { k ->
                         main.post { showMessage(getString(R.string.compare_progress_fmt, getString(label), k + 1, plan.count)) }

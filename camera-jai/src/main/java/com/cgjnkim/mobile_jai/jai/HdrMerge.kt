@@ -111,4 +111,27 @@ object HdrMerge {
             val us = anchorUs * Math.pow(ratio, (k - anchorIndex).toDouble())
             min(max(us, minUs), maxUs)
         }
+
+    /**
+     * How much more light [longer] caught than [shorter], read off the pixels both saw
+     * well: above the noise in the shorter, below the clip in the longer. It should be the
+     * exposure ratio; when a bracket frame was exposed before its shutter took effect it is
+     * not, which is what this is for. Null when too few pixels qualify.
+     */
+    fun measuredRatio(shorter: ShortArray, longer: ShortArray, black: Float = BLACK, clipLevel: Float = CLIP, minPixels: Int = 2000): Double? {
+        if (shorter.size != longer.size) return null
+        var sumShort = 0.0
+        var sumLong = 0.0
+        var count = 0
+        for (i in shorter.indices) {
+            val a = (shorter[i].toInt() and 0xFFFF) - black
+            val b = (longer[i].toInt() and 0xFFFF)
+            if (a > 4 * NOISE_FLOOR && b < clipLevel) {
+                sumShort += a
+                sumLong += b - black
+                count++
+            }
+        }
+        return if (count >= minPixels && sumShort > 0) sumLong / sumShort else null
+    }
 }
