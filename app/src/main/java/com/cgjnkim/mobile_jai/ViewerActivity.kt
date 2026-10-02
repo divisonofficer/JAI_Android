@@ -502,7 +502,11 @@ class ViewerActivity : AppCompatActivity() {
     /** Whatever the view settings say this capture should look like. */
     private fun drawView(data: Loaded, src: Source, wb: Boolean, frame: Int, step: Int): Bitmap? {
         if (src == Source.DEPTH) {
-            return if (depthOnJai) drawDepthOnJai(data) else drawDepth(data.depth, data.metadata)
+            if (depthOnJai) return drawDepthOnJai(data)
+            // Unwrapped when the planes are there to do it with; the Z plane alone otherwise.
+            val entry = entries.firstOrNull { it.stamp == data.stamp }
+            val sample = data.depthSample ?: entry?.let { depthSample(it, data.metadata) }?.also { data.depthSample = it }
+            return if (sample != null) drawDepth(sample, data.metadata) else drawDepth(data.depth, data.metadata)
         }
         if (!data.isHdr) return draw(if (src == Source.RGB) data.rgb else data.nir, src, wb, data.gains, step)
         if (active) {
@@ -563,6 +567,15 @@ class ViewerActivity : AppCompatActivity() {
      * Z coloured near-to-far as in the camera preview. 640x480 is small enough that
      * there is no half-size pass; the scale comes from the capture's own metadata.
      */
+    private fun drawDepth(sample: DepthSample, metadata: JSONObject?): Bitmap? {
+        val d = metadata?.optJSONObject("depth")
+        val scale = d?.optJSONArray("scale")?.optDouble(2) ?: DEFAULT_DEPTH_SCALE
+        val offset = d?.optJSONArray("offset")?.optDouble(2) ?: 0.0
+        val pixels = IntArray(sample.width * sample.height)
+        DepthRenderer.renderDepth(sample.zCounts(), scale, offset, pixels)
+        return Bitmap.createBitmap(pixels, sample.width, sample.height, Bitmap.Config.ARGB_8888)
+    }
+
     private fun drawDepth(raw: TiffReader.Raw?, metadata: JSONObject?): Bitmap? {
         raw ?: return null
         val d = metadata?.optJSONObject("depth")
@@ -593,15 +606,9 @@ class ViewerActivity : AppCompatActivity() {
         return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
     }
 
-    private fun depthSample(entry: CaptureEntry, metadata: JSONObject?): DepthSample? {
-        val planes = listOf("x", "y", "z").map { entry.depthTiffs[it] ?: return null }
-            .map { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() ?: return null }
-        val d = metadata?.optJSONObject("depth")
-        val scale = DoubleArray(3) { d?.optJSONArray("scale")?.optDouble(it) ?: DEFAULT_DEPTH_SCALE }
-        val offset = DoubleArray(3) { i -> d?.optJSONArray("offset")?.optDouble(i) ?: if (i < 2) -8192.0 else 0.0 }
-        return DepthSample(planes[0].samples, planes[1].samples, planes[2].samples,
-            planes[0].width, planes[0].height, scale, offset)
-    }
+    /** Phase wrap undone: see CaptureProcessing.depthSample. */
+    private fun depthSample(entry: CaptureEntry, metadata: JSONObject?): DepthSample? =
+        runCatching { CaptureProcessing.depthSample(this, entry, metadata) }.getOrNull()
 
     /** A burst has no single NIR frame; its anchor bracket is the one at the dial's exposure. */
     private fun anchorNir(entry: CaptureEntry, data: Loaded): TiffReader.Raw? {
@@ -658,9 +665,8 @@ class ViewerActivity : AppCompatActivity() {
                 val nir = entry.nirTiff?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
                 return drawDepthOnJai(Loaded(entry.stamp, null, nir, RawDisplay.Gains.UNITY, metadata))
             }
-            val uri = entry.depthTiffs["z"] ?: return null
-            val raw = runCatching { CaptureLibrary.readTiff(this, uri) }.getOrNull() ?: return null
-            return drawDepth(raw, metadata)
+            val sample = depthSample(entry, metadata) ?: return null
+            return drawDepth(sample, metadata)
         }
         val uri = (if (src == Source.RGB) entry.rgbTiff else entry.nirTiff) ?: return null
         val raw = runCatching { CaptureLibrary.readTiff(this, uri) }.getOrNull() ?: return null

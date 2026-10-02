@@ -62,13 +62,20 @@ object CaptureProcessing {
         return mask.size
     }
 
-    /** The saved x, y, z planes with the scale and offset that turn them into millimetres. */
+    /**
+     * The saved x, y, z planes with the scale and offset that turn them into millimetres,
+     * with phase wrap undone: points beyond the mode's range that the Helios reported as
+     * near are moved back out or dropped (see PhaseUnwrap). Needs the intensity plane and
+     * the operating mode; without them the planes come as saved.
+     */
     fun depthSample(context: Context, entry: CaptureEntry, metadata: JSONObject?): DepthSample? {
         val planes = listOf("x", "y", "z").map { p -> entry.depthTiffs[p]?.let { CaptureLibrary.readTiff(context, it) } ?: return null }
+        val intensity = entry.depthTiffs["intensity"]?.let { runCatching { CaptureLibrary.readTiff(context, it) }.getOrNull() }
         val d = metadata?.optJSONObject("depth")
         val scale = DoubleArray(3) { d?.optJSONArray("scale")?.optDouble(it) ?: DEPTH_SCALE }
         val offset = DoubleArray(3) { i -> d?.optJSONArray("offset")?.optDouble(i) ?: DEPTH_OFFSET[i] }
-        return DepthSample(planes[0].samples, planes[1].samples, planes[2].samples, planes[0].width, planes[0].height, scale, offset)
+        return DepthSample.unwrapped(planes[0].samples, planes[1].samples, planes[2].samples, intensity?.samples,
+            planes[0].width, planes[0].height, scale, offset, d?.optString("operating_mode"))
     }
 
     /**

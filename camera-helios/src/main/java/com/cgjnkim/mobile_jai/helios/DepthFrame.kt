@@ -39,6 +39,14 @@ class DepthFrame(val raw: RawFrame, val scale: DoubleArray, val offset: DoubleAr
 
     fun intensity(pixel: Int): Int = word(pixel, 3)
 
+    /** Distance from the camera along the pixel's ray, in millimetres. */
+    fun radialMm(pixel: Int): Double {
+        val a = word(pixel, 0) * scale[0] + offset[0]
+        val b = word(pixel, 1) * scale[1] + offset[1]
+        val c = word(pixel, 2) * scale[2] + offset[2]
+        return kotlin.math.sqrt(a * a + b * b + c * c)
+    }
+
     companion object {
         const val COORD3D_ABCY16 = 0x82400403.toInt()
         const val INVALID = 0xFFFF

@@ -22,7 +22,7 @@ object DepthRenderer {
     fun render(frame: DepthFrame, view: View, out: IntArray) {
         when (view) {
             View.DEPTH -> {
-                lastRangeMm = renderDepth(frame.plane(2), frame.scale[2], frame.offset[2], out)
+                lastRangeMm = renderDepth(dropFolded(frame), frame.scale[2], frame.offset[2], out)
             }
             View.INTENSITY -> renderIntensity(frame.plane(3), out)
         }
@@ -55,6 +55,21 @@ object DepthRenderer {
             out[i] = if (c == DepthFrame.INVALID) BLACK else lut[c.coerceIn(near, far) - near]
         }
         return (near * scale + offset) to (far * scale + offset)
+    }
+
+    /**
+     * Z with the pixels [PhaseUnwrap] would suspect of having folded over blanked: the
+     * live preview's cheap stand-in for unwrapping, which costs too much at 8 fps. Saved
+     * frames are unwrapped properly where they are read.
+     */
+    private fun dropFolded(frame: DepthFrame): ShortArray {
+        val z = frame.plane(2)
+        for (i in z.indices) {
+            if (!frame.isValid(i)) continue
+            val d = frame.radialMm(i) / 1000
+            if (frame.intensity(i) * d * d < PhaseUnwrap.MIN_REFLECTIVITY) z[i] = DepthFrame.INVALID.toShort()
+        }
+        return z
     }
 
     /** ToF intensity -- a live frame's, or a saved `_depth_intensity.tiff` -- as grey with a display gamma. */

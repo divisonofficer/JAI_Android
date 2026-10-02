@@ -1,6 +1,7 @@
 package com.cgjnkim.mobile_jai.calib
 
 import com.cgjnkim.mobile_jai.helios.DepthFrame
+import com.cgjnkim.mobile_jai.helios.PhaseUnwrap
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -31,6 +32,9 @@ class DepthSample(
     }
 
     fun valid(i: Int) = (z[i].toInt() and 0xFFFF) != DepthFrame.INVALID && mm(2, i) > 0
+
+    /** Z in the camera's counts, for drawing. */
+    fun zCounts(): ShortArray = z
 
     /**
      * The point under (px, py), pixel centres on integers; the median of the neighbours
@@ -83,12 +87,26 @@ class DepthSample(
         }
     }
 
-    private companion object {
+    companion object {
+        /**
+         * A saved frame with what folded over put back or dropped ([PhaseUnwrap]): what
+         * every reader of saved depth should see. The files themselves stay as the camera
+         * sent them.
+         */
+        fun unwrapped(
+            x: ShortArray, y: ShortArray, z: ShortArray, intensity: ShortArray?,
+            width: Int, height: Int, scale: DoubleArray, offset: DoubleArray, operatingMode: String?,
+        ): DepthSample {
+            if (intensity == null) return DepthSample(x, y, z, width, height, scale, offset)
+            val r = PhaseUnwrap.apply(x, y, z, intensity, width, height, scale, offset, PhaseUnwrap.rangeMm(operatingMode))
+            return DepthSample(r.x, r.y, r.z, width, height, scale, offset)
+        }
+
         /** Neighbourhood half-size: 7x7 ToF pixels. */
-        const val RADIUS = 3
-        const val MIN_VALID = 6
+        private const val RADIUS = 3
+        private const val MIN_VALID = 6
 
         /** Neighbours farther than this fraction of the depth from the pick's belong to another surface. */
-        const val EDGE_FRACTION = 0.05
+        private const val EDGE_FRACTION = 0.05
     }
 }

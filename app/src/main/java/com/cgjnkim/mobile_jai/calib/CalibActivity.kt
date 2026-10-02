@@ -185,8 +185,8 @@ class CalibActivity : AppCompatActivity() {
         val depth = CaptureLibrary.metadata(this, entry)?.optJSONObject("depth")
         val scale = DoubleArray(3) { depth?.optJSONArray("scale")?.optDouble(it) ?: DEFAULT_SCALE }
         val offset = DoubleArray(3) { i -> depth?.optJSONArray("offset")?.optDouble(i) ?: DEFAULT_OFFSET[i] }
-        val sample = DepthSample(planes[0].samples, planes[1].samples, planes[2].samples,
-            planes[0].width, planes[0].height, scale, offset)
+        val sample = DepthSample.unwrapped(planes[0].samples, planes[1].samples, planes[2].samples, planes[3].samples,
+            planes[0].width, planes[0].height, scale, offset, depth?.optString("operating_mode"))
         Scene(sample, planes[3].samples, depth?.optString("operating_mode").orEmpty()).also { sceneCache[s] = it }
     }.onFailure { Log.w(TAG, "depth of $s", it) }.getOrNull()
 
