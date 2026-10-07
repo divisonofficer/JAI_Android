@@ -17,6 +17,8 @@ import com.cgjnkim.mobile_jai.dcs.DcsLight
 import com.cgjnkim.mobile_jai.dcs.R as DcsR
 import com.cgjnkim.mobile_jai.helios.DepthRenderer
 import com.cgjnkim.mobile_jai.helios.HeliosCamera
+import com.cgjnkim.mobile_jai.helios.TritonCamera
+import com.cgjnkim.mobile_jai.helios.TritonDisplay
 import com.cgjnkim.mobile_jai.jai.GigeDiscovery
 import com.cgjnkim.mobile_jai.jai.JaiCamera
 import com.cgjnkim.mobile_jai.jai.JaiCamera.Source
@@ -27,6 +29,7 @@ import com.cgjnkim.mobile_jai.jai.Upright
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.util.concurrent.Executors
+import kotlin.math.ceil
 import kotlin.math.log10
 import kotlin.math.pow
 import kotlin.math.roundToLong
@@ -56,6 +59,12 @@ class MainActivity : AppCompatActivity() {
     private val saver = Executors.newSingleThreadExecutor()
 
     /**
+     * Looks for the JAI before [worker] is given its connect: a discovery that finds
+     * nothing takes seconds, and on [worker] it would hold up the shutter behind it.
+     */
+    private val scout = Executors.newSingleThreadExecutor()
+
+    /**
      * The flash: an Advanced Illumination DCS controller on the same Ethernet link. It
      * has its own worker so that finding it -- a sweep of the subnet -- never holds up the
      * camera; a capture still switches it on and off from [worker], in step with the shot.
@@ -66,6 +75,14 @@ class MainActivity : AppCompatActivity() {
     /** The depth camera, with its own worker so that its open and mode changes never hold up the JAI. */
     private val helios = HeliosCamera()
     private val heliosWorker = Executors.newSingleThreadExecutor()
+
+    /**
+     * The Lucid Triton HDR colour camera: a colour stream of its own, with the JAI or
+     * without it. It streams only while its preview is shown -- 5.4 MB frames on the shared
+     * adapter -- and a capture takes one raw 24-bit frame from it after the JAI's pair.
+     */
+    private val lucid = TritonCamera()
+    private val lucidWorker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("camera", MODE_PRIVATE) }
 
@@ -106,6 +123,19 @@ class MainActivity : AppCompatActivity() {
     private var nextLightCheckAt = 0L
     private var nextLightAt = 0L
 
+    /** The preview and the dials are the Lucid Triton's rather than the JAI's [source]. */
+    @Volatile private var showLucid = false
+    @Volatile private var lucidConnecting = false
+
+    /** Whether the preview has been given to the Lucid on its own yet; once a launch. */
+    private var lucidChosen = false
+    private var nextLucidAt = 0L
+    private var lastLucid: RawFrame? = null
+    private var lucidShutterUs = DEFAULT_LUCID_US
+    private var lucidGainMilliDb = 0L
+    private var lucidExposureRange = 143L..4_998_000L
+    private var lucidGainRangeDb = 0.0..42.0
+
     /** The preview shows the Helios rather than [source]; [source] stays what the JAI dials control. */
     @Volatile private var showDepth = false
     private var depthView = DepthRenderer.View.DEPTH
@@ -135,6 +165,7 @@ class MainActivity : AppCompatActivity() {
             if (!light.isOpen && !lightConnecting && SystemClock.uptimeMillis() >= nextLightAt) connectLight()
             if (light.isOpen && !capturing && SystemClock.uptimeMillis() >= nextLightCheckAt) checkLight()
             if (!helios.isOpen && !heliosConnecting && SystemClock.uptimeMillis() >= nextHeliosAt) connectHelios()
+            if (!lucid.isOpen && !lucidConnecting && SystemClock.uptimeMillis() >= nextLucidAt) connectLucid()
             main.postDelayed(this, PREVIEW_INTERVAL_MS)
         }
     }
@@ -158,6 +189,10 @@ class MainActivity : AppCompatActivity() {
         binding.sourceNir.setOnClickListener { selectSource(Source.NIR) }
         binding.sourceDepth.setOnClickListener { selectDepth() }
         binding.chipDepth.setOnClickListener { reconnectHelios() }
+        binding.sourceLucid.setOnClickListener { selectLucid() }
+        binding.chipLucid.setOnClickListener { reconnectLucid() }
+        lucidShutterUs = prefs.getLong("shutter_lucid", DEFAULT_LUCID_US)
+        lucidGainMilliDb = prefs.getLong("gain_lucid", 0)
         // While the depth preview is up, the two readings are the Helios's mode and exposure.
         binding.shutterReading.setOnClickListener { if (showDepth) cycleDepthMode() else { dial = Dial.SHUTTER; showDial() } }
         binding.gainReading.setOnClickListener { if (showDepth) cycleDepthExposure() else { dial = Dial.GAIN; showDial() } }
@@ -212,6 +247,7 @@ class MainActivity : AppCompatActivity() {
         // Off, and the controller free for anyone else: a backgrounded app should not leave a light burning.
         lightWorker.execute { light.close() }
         heliosWorker.execute { helios.close() }
+        lucidWorker.execute { lucid.close() }
         showStatus()
     }
 
@@ -219,9 +255,12 @@ class MainActivity : AppCompatActivity() {
         worker.execute { camera.close() }
         lightWorker.execute { light.close() }
         heliosWorker.execute { helios.close() }
+        lucidWorker.execute { lucid.close() }
         worker.shutdown()
+        scout.shutdown()
         lightWorker.shutdown()
         heliosWorker.shutdown()
+        lucidWorker.shutdown()
         saver.shutdown()
         super.onDestroy()
     }
@@ -231,39 +270,65 @@ class MainActivity : AppCompatActivity() {
     private fun connect() {
         connecting = true
         showStatus()
-        worker.execute {
-            val ok = camera.open()
-            if (ok) {
-                // The dials' values, not the camera's power-on ones: the settings are
-                // the user's and should survive a reconnect.
-                runCatching {
-                    for (s in Source.values()) {
-                        camera.setGain(s, dbToLinear(gainMilliDb[s.index] / 1000.0))
-                        camera.setExposure(s, shutterUs[s.index].toDouble())
-                    }
-                }.onFailure { Log.w(TAG, "restoring settings", it) }
-            }
-            val range = if (ok) runCatching { camera.gainRange(Source.RGB) }.getOrNull() else null
-            val applied = Source.values().map { camera.exposure(it) to camera.gain(it) }
-            main.post {
+        scout.execute {
+            val link = GigeDiscovery.findLink()
+            if (link != null && GigeDiscovery.discover(link).any { it.isJai }) worker.execute { open() }
+            else main.post {
                 connecting = false
-                if (ok) {
-                    range?.let { gainRangeDb = linearToDb(it.start)..linearToDb(it.endInclusive) }
-                    for (s in Source.values()) {
-                        shutterUs[s.index] = applied[s.index].first.roundToLong()
-                        gainMilliDb[s.index] = (linearToDb(applied[s.index].second) * 1000).roundToLong()
-                    }
-                    showMessage("${camera.info?.model} · ${camera.info?.serial}")
-                } else {
-                    nextConnectAt = SystemClock.uptimeMillis() + RETRY_MS
-                    showMessage(
-                        if (camera.link == null) getString(R.string.status_no_link) else camera.error
-                    )
-                }
-                showDial()
+                nextConnectAt = SystemClock.uptimeMillis() + RETRY_MS
+                if (!lucid.isOpen) showMessage(if (link == null) getString(R.string.status_no_link) else getString(R.string.status_no_jai))
                 showStatus()
+                autoLucid()
             }
         }
+    }
+
+    /** The JAI's connect proper, on [worker], once [connect] has seen it answer. */
+    private fun open() {
+        val ok = camera.open()
+        if (ok) {
+            // The dials' values, not the camera's power-on ones: the settings are
+            // the user's and should survive a reconnect.
+            runCatching {
+                for (s in Source.values()) {
+                    camera.setGain(s, dbToLinear(gainMilliDb[s.index] / 1000.0))
+                    camera.setExposure(s, shutterUs[s.index].toDouble())
+                }
+            }.onFailure { Log.w(TAG, "restoring settings", it) }
+        }
+        val range = if (ok) runCatching { camera.gainRange(Source.RGB) }.getOrNull() else null
+        val applied = Source.values().map { camera.exposure(it) to camera.gain(it) }
+        main.post {
+            connecting = false
+            if (ok) {
+                range?.let { gainRangeDb = linearToDb(it.start)..linearToDb(it.endInclusive) }
+                for (s in Source.values()) {
+                    shutterUs[s.index] = applied[s.index].first.roundToLong()
+                    gainMilliDb[s.index] = (linearToDb(applied[s.index].second) * 1000).roundToLong()
+                }
+                showMessage("${camera.info?.model} · ${camera.info?.serial}")
+            } else {
+                nextConnectAt = SystemClock.uptimeMillis() + RETRY_MS
+                // With the Lucid there the JAI is optional: its chip says it is offline,
+                // and a message every retry would only be noise.
+                if (!lucid.isOpen) showMessage(
+                    if (camera.link == null) getString(R.string.status_no_link) else camera.error
+                )
+            }
+            showDial()
+            showStatus()
+            autoLucid()
+        }
+    }
+
+    /**
+     * With the Lucid there and no JAI, the preview starts on the Lucid rather than on an
+     * empty JAI view. Once a launch: after that the choice is the user's.
+     */
+    private fun autoLucid() {
+        if (lucidChosen || connecting || camera.isOpen || !lucid.isOpen) return
+        lucidChosen = true
+        if (!showLucid && !showDepth) selectLucid()
     }
 
     /** Drops the connection; the preview tick opens it again on its next pass. */
@@ -291,6 +356,114 @@ class MainActivity : AppCompatActivity() {
             else -> camera.error.ifEmpty { "offline" }.take(40)
         }
         updateShutter()
+    }
+
+    // ---- Lucid Triton --------------------------------------------------------------
+
+    private fun connectLucid() {
+        if (GigeDiscovery.findLink() == null) { nextLucidAt = SystemClock.uptimeMillis() + RETRY_MS; return }
+        lucidConnecting = true
+        showLucidStatus()
+        lucidWorker.execute {
+            // Streams only while shown: see the field's comment.
+            val ok = lucid.open(stream = showLucid)
+            var exposure: ClosedFloatingPointRange<Double>? = null
+            var gain: ClosedFloatingPointRange<Double>? = null
+            if (ok) runCatching {
+                exposure = lucid.exposureRange()
+                gain = lucid.gainRange()
+                lucid.setExposure(lucidShutterUs.toDouble())
+                lucid.setGain(lucidGainMilliDb / 1000.0)
+            }.onFailure { Log.w(TAG, "restoring Lucid settings", it) }
+            main.post {
+                lucidConnecting = false
+                if (!ok) nextLucidAt = SystemClock.uptimeMillis() + LUCID_RETRY_MS
+                else {
+                    exposure?.let { lucidExposureRange = ceil(it.start).toLong()..it.endInclusive.toLong() }
+                    gain?.let { lucidGainRangeDb = it }
+                    lucidShutterUs = lucid.exposureUs.roundToLong()
+                    lucidGainMilliDb = (lucid.gainDb * 1000).roundToLong()
+                    if (showLucid) showMessage("${lucid.info?.model} · ${lucid.info?.serial}")
+                }
+                showLucidStatus()
+                autoLucid()
+                showDial()
+                updateShutter()
+            }
+        }
+    }
+
+    private fun reconnectLucid() {
+        if (lucidConnecting) return
+        lucidWorker.execute {
+            lucid.close()
+            main.post { nextLucidAt = 0; showLucidStatus(); updateShutter() }
+        }
+    }
+
+    private fun showLucidStatus() {
+        val color = when {
+            lucid.isOpen -> R.color.camera_ok
+            lucidConnecting -> R.color.camera_accent
+            else -> R.color.camera_warning
+        }
+        binding.dotLucid.background.mutate().setTint(ContextCompat.getColor(this, color))
+        binding.lucidInfo.text = when {
+            lucid.isOpen -> getString(R.string.lucid_info_fmt, if (showLucid) previewFps() else lucid.frameRate,
+                lucid.info?.address?.hostAddress ?: "")
+            lucidConnecting -> getString(R.string.status_connecting)
+            else -> lucid.error.ifEmpty { "offline" }.take(40)
+        }
+    }
+
+    private fun selectLucid() {
+        if (showDepth && helios.isOpen) heliosWorker.execute { runCatching { helios.stopStreaming() } }
+        showDepth = false
+        showLucid = true
+        lastLucid = null
+        frameTimes.clear()
+        if (lucid.isOpen) lucidWorker.execute {
+            runCatching { lucid.startStreaming() }.onFailure { Log.w(TAG, "lucid preview", it) }
+        }
+        if (dial == Dial.LEVEL) dial = Dial.SHUTTER
+        showModes()
+        showDial()
+    }
+
+    /** Leaving the Lucid preview: its stream would only take the link from the others. */
+    private fun quietLucid() {
+        if (showLucid && lucid.isOpen) lucidWorker.execute { runCatching { lucid.stopStreaming() } }
+        showLucid = false
+    }
+
+    /** Back to streaming after a capture, if the Lucid preview is what is showing. */
+    private fun resumeLucidPreview() {
+        if (showLucid && lucid.isOpen) lucidWorker.execute {
+            runCatching { lucid.startStreaming() }.onFailure { Log.w(TAG, "lucid preview", it) }
+        }
+    }
+
+    /** The Triton's 8-bit preview through its gamma LUT, balanced here, one pixel per 2x2 cell (not turned). */
+    private fun renderLucid() {
+        if (!lucid.isOpen) return
+        val frame = lucid.latestFrame() ?: return
+        if (frame === lastLucid) return
+        lastLucid = frame
+        noteFrame()
+        val (w, h) = TritonDisplay.size(frame)
+        if (previewPixels.size != w * h) previewPixels = IntArray(w * h)
+        TritonDisplay.renderPreview(frame, previewPixels)
+        var bitmap = previewBitmap
+        if (bitmap == null || bitmap.width != w || bitmap.height != h) {
+            val replacement = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            binding.preview.setImageBitmap(replacement)
+            bitmap?.recycle()
+            previewBitmap = replacement
+            bitmap = replacement
+        }
+        bitmap.setPixels(previewPixels, 0, w, 0, 0, w, h)
+        binding.preview.invalidate()
+        showLucidStatus()
     }
 
     // ---- depth camera --------------------------------------------------------------
@@ -361,6 +534,7 @@ class MainActivity : AppCompatActivity() {
         if (showDepth) {
             depthView = if (depthView == DepthRenderer.View.DEPTH) DepthRenderer.View.INTENSITY else DepthRenderer.View.DEPTH
         }
+        quietLucid()
         showDepth = true
         lastDepth = null
         frameTimes.clear()
@@ -405,6 +579,7 @@ class MainActivity : AppCompatActivity() {
     // ---- preview ------------------------------------------------------------------
 
     private fun renderPreview() {
+        if (showLucid) return renderLucid()
         if (showDepth) return renderDepth()
         if (!camera.isOpen) return
         val frame = camera.latestFrame(source) ?: return
@@ -473,6 +648,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectSource(s: Source) {
         source = s
+        quietLucid()
         // The ToF light would show in the NIR preview; nothing needs it now.
         if (showDepth && helios.isOpen) heliosWorker.execute { runCatching { helios.stopStreaming() } }
         showDepth = false
@@ -486,8 +662,10 @@ class MainActivity : AppCompatActivity() {
         val accent = ContextCompat.getColor(this, R.color.camera_accent)
         val white = ContextCompat.getColor(this, android.R.color.white)
         val quiet = ContextCompat.getColor(this, R.color.camera_quiet)
-        binding.sourceRgb.setTextColor(if (!showDepth && source == Source.RGB) accent else white)
-        binding.sourceNir.setTextColor(if (!showDepth && source == Source.NIR) accent else white)
+        val jai = !showDepth && !showLucid
+        binding.sourceRgb.setTextColor(if (jai && source == Source.RGB) accent else white)
+        binding.sourceNir.setTextColor(if (jai && source == Source.NIR) accent else white)
+        binding.sourceLucid.setTextColor(if (showLucid) accent else white)
         binding.sourceDepth.setTextColor(if (showDepth) accent else white)
         binding.sourceDepth.text = getString(
             if (showDepth && depthView == DepthRenderer.View.INTENSITY) R.string.source_intensity else R.string.source_depth
@@ -549,6 +727,16 @@ class MainActivity : AppCompatActivity() {
                 flashLevelMa.toLong(),
             )
         }
+        // The Lucid's own shutter and gain, on the same dials.
+        if (showLucid) {
+            binding.shutterReading.text = getString(R.string.shutter_reading_fmt, ExposureStops.formatShutter(lucidShutterUs))
+            binding.gainReading.text = getString(R.string.gain_reading_fmt, ExposureStops.formatGainMilliDb(lucidGainMilliDb))
+            when (dial) {
+                Dial.SHUTTER -> binding.exposureDial.setStops(ExposureStops.shutter(lucidExposureRange), lucidShutterUs)
+                Dial.GAIN -> binding.exposureDial.setStops(ExposureStops.gain(lucidGainRangeDb), lucidGainMilliDb)
+                Dial.LEVEL -> {}
+            }
+        }
         // The Helios's settings are a handful of named entries, stepped by tapping, not dialled.
         if (showDepth) {
             val open = helios.isOpen
@@ -565,6 +753,7 @@ class MainActivity : AppCompatActivity() {
      * reading set from what the camera took rather than what was asked for.
      */
     private fun onDialPicked(stop: ValueDial.Stop) {
+        if (showLucid && dial != Dial.LEVEL) return onLucidDialPicked(stop)
         val s = source
         when (dial) {
             Dial.SHUTTER -> {
@@ -597,6 +786,31 @@ class MainActivity : AppCompatActivity() {
                 flashLevelMa = stop.value.toInt()
                 prefs.edit().putInt("flash_level_ma", flashLevelMa).apply()
                 applyFlash()
+            }
+        }
+        showDial()
+    }
+
+    /** The Lucid's shutter or gain: written, read back, and the reading set from what it took. */
+    private fun onLucidDialPicked(stop: ValueDial.Stop) {
+        val shutter = dial == Dial.SHUTTER
+        if (shutter) {
+            lucidShutterUs = stop.value
+            prefs.edit().putLong("shutter_lucid", stop.value).apply()
+        } else {
+            lucidGainMilliDb = stop.value
+            prefs.edit().putLong("gain_lucid", stop.value).apply()
+        }
+        if (lucid.isOpen) lucidWorker.execute {
+            val applied = runCatching {
+                if (shutter) lucid.setExposure(stop.value.toDouble()) else lucid.setGain(stop.value / 1000.0)
+            }.onFailure { Log.w(TAG, "lucid ${if (shutter) "exposure" else "gain"}", it) }.getOrNull()
+            main.post {
+                if (applied != null) {
+                    if (shutter && lucidShutterUs == stop.value) lucidShutterUs = applied.roundToLong()
+                    if (!shutter && lucidGainMilliDb == stop.value) lucidGainMilliDb = (applied * 1000).roundToLong()
+                }
+                showDial()
             }
         }
         showDial()
@@ -709,9 +923,14 @@ class MainActivity : AppCompatActivity() {
 
     // ---- capture ------------------------------------------------------------------
 
-    /** The ToF light off before the JAI exposes: on [worker], ahead of any JAI capture. */
+    /**
+     * The ToF light off before the JAI exposes: on [worker], ahead of any JAI capture. The
+     * Lucid's preview stops too while the JAI is there, so as not to share the link with its
+     * full-resolution frames; a Lucid capture starts it again for its own frame.
+     */
     private fun darkenDepth() {
         if (helios.isStreaming) runCatching { helios.stopStreaming() }.onFailure { Log.w(TAG, "depth off", it) }
+        if (camera.isOpen && lucid.isStreaming) runCatching { lucid.stopStreaming() }.onFailure { Log.w(TAG, "lucid off", it) }
     }
 
     /** One depth frame once the JAI's are all in; lit only for it. On [worker]. */
@@ -726,8 +945,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun capture() {
-        if (capturing || pendingSaves >= MAX_PENDING_SAVES || !camera.isOpen) return
-        if (hdr) return if (compare != Compare.OFF) captureCompare() else captureHdr()
+        if (capturing || pendingSaves >= MAX_PENDING_SAVES || (!camera.isOpen && !lucid.isOpen)) return
+        // Brackets are the JAI's; with only the Lucid there, the shutter takes its one frame.
+        if (hdr && camera.isOpen) return if (compare != Compare.OFF) captureCompare() else captureHdr()
         capturing = true
         pendingSaves++
         binding.shutterProgress.visibility = View.VISIBLE
@@ -741,28 +961,41 @@ class MainActivity : AppCompatActivity() {
             val lit = flash != Flash.OFF && runCatching { light.setOn(); true }
                 .onFailure { Log.w(TAG, "flash on", it) }.getOrDefault(false)
             darkenDepth()
-            val result = camera.capture(onTriggered = ::onTriggered)
+            // The JAI's pair when it is there, then the Lucid's raw frame, then depth.
+            val result = if (camera.isOpen) camera.capture(onTriggered = ::onTriggered) else null
             if (flash == Flash.CAPTURE && lit) runCatching { light.setOff() }.onFailure { Log.w(TAG, "flash off", it) }
             val flashRecord = flashRecord(lit)
-            // Depth only now that the pair is in: the ToF light would have been in its NIR.
-            val depth = result.getOrNull()?.let { grabDepth(it.hostTimeNs) }
+            val jaiCap = result?.getOrNull()
+            val lucidCap = if (lucid.isOpen && result?.isFailure != true) {
+                if (result == null) onTriggered()
+                lucid.capture(afterHostNs = jaiCap?.hostTimeNs ?: System.nanoTime())
+                    .onFailure { Log.w(TAG, "lucid capture", it) }
+            } else null
+            resumeLucidPreview()
+            // Depth only now that the colour frames are in: the ToF light would have been in the JAI's NIR.
+            val reference = jaiCap?.hostTimeNs ?: lucidCap?.getOrNull()?.hostNs
+            val depth = reference?.let { grabDepth(it) }
             resumeDepthPreview()
             main.post {
                 capturing = false
                 binding.shutterProgress.visibility = View.GONE
                 updateShutter()
             }
-            result.onFailure { e ->
+            val failure = result?.exceptionOrNull() ?: if (jaiCap == null) lucidCap?.exceptionOrNull() else null
+            if (failure != null || (jaiCap == null && lucidCap?.getOrNull() == null)) {
+                val e = failure ?: IllegalStateException("no camera answered")
                 Log.e(TAG, "capture failed", e)
                 main.post { pendingSaves--; updateShutter(); showMessage(e.message ?: "capture failed") }
+                return@execute
             }
-            result.onSuccess { cap ->
-                showThumbnail(cap.pair.rgb)
+            if (jaiCap != null) showThumbnail(jaiCap.pair.rgb) else lucidCap?.getOrNull()?.let { showLucidThumbnail(it) }
+            run {
                 saver.execute {
                     val message = try {
                         val saved = CaptureStore.save(
-                            this, cap, camera.info, stamp, flash = flashRecord,
+                            this, jaiCap, camera.info, stamp, flash = flashRecord,
                             depth = depth?.getOrNull(), depthDevice = helios.info,
+                            lucid = lucidCap?.getOrNull(), lucidDevice = lucid.info,
                         ).size
                         depth?.exceptionOrNull()?.let { getString(R.string.status_saved_no_depth, saved, it.message) }
                             ?: getString(R.string.status_saved, saved)
@@ -807,6 +1040,7 @@ class MainActivity : AppCompatActivity() {
             val anchor = plan.anchorIndex
             // After the whole bracket, measured from the anchor's exposure.
             val depth = result.getOrNull()?.let { burst -> grabDepth(burst[anchor.coerceIn(0, burst.lastIndex)].hostTimeNs) }
+            resumeLucidPreview()
             resumeDepthPreview()
             main.post {
                 capturing = false
@@ -895,6 +1129,7 @@ class MainActivity : AppCompatActivity() {
             val (ambient, ambientDepth) =
                 if (lit.isSuccess) burst(R.string.compare_ambient) {} else Pair(Result.failure<List<JaiCamera.Capture>>(lit.exceptionOrNull()!!), null)
             if (flash == Flash.ALWAYS && light.isOpen) runCatching { light.setOn() }.onFailure { Log.w(TAG, "flash restore", it) }
+            resumeLucidPreview()
             resumeDepthPreview()
 
             main.post {
@@ -954,6 +1189,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** The capture as the gallery will show it: upright, balanced for display. */
+    /** The Lucid's raw frame as the gallery will show it, when there is no JAI pair. */
+    private fun showLucidThumbnail(c: TritonCamera.Capture) {
+        val (w, h) = TritonDisplay.size(c.frame, 4)
+        val pixels = IntArray(w * h)
+        TritonDisplay.renderRaw(c.frame, pixels, 4)
+        val bitmap = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+        main.post { binding.lastCapture.setImageBitmap(bitmap) }
+    }
+
     private fun showThumbnail(frame: RawFrame) {
         val image = Upright.image(frame, Upright.SIDE)
         DefectRepair.mend(camera.info?.serial, Source.RGB, image.samples, image.side, image.side)
@@ -971,7 +1215,7 @@ class MainActivity : AppCompatActivity() {
      * for an out-of-memory kill.
      */
     private fun updateShutter() {
-        binding.shutter.isEnabled = camera.isOpen && !capturing && pendingSaves < MAX_PENDING_SAVES
+        binding.shutter.isEnabled = (camera.isOpen || lucid.isOpen) && !capturing && pendingSaves < MAX_PENDING_SAVES
     }
 
     private fun showMessage(text: String) {
@@ -998,6 +1242,8 @@ class MainActivity : AppCompatActivity() {
         const val LIGHT_RETRY_MS = 10_000L
         const val LIGHT_CHECK_MS = 5_000L
         const val HELIOS_RETRY_MS = 5_000L
+        const val LUCID_RETRY_MS = 5_000L
+        const val DEFAULT_LUCID_US = 20_000L
         const val DEFAULT_FLASH_MA = 300
         const val DEFAULT_MAX_FLASH_MA = 1000
         const val FLASH_STEP_MA = 25

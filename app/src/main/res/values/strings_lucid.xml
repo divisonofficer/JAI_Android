@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Lucid Triton HDR colour camera: kept apart so its strings never collide with others' edits. -->
+<resources>
+    <string name="camera_lucid">LUCID</string>
+    <string name="source_lucid">LUCID</string>
+    <string name="lucid_info_fmt">%1$.1f fps · %2$s</string>
+    <string name="status_no_camera">No camera connected</string>
+    <string name="status_no_jai">No JAI camera answered</string>
+</resources>

@@ -375,6 +375,15 @@ class NodeMap(xml: String, private val port: RegisterPort) {
         repeat(MAX_HOPS) {
             text(e, literal)?.let { return if (it.startsWith("0x", ignoreCase = true)) number(it).toDouble() else it.toDouble() }
             pointerOrNull(e, pointer)?.let { return value(it) }
+            // A Converter's bounds are its raw value's, carried through FormulaFrom: the
+            // Triton's ExposureTime is ExposureTimeRaw / 125. A falling formula swaps them.
+            if (tag(e) == "Converter") {
+                val raw = pointer(e, "pValue")
+                val from = formula(e, "FormulaFrom")
+                val a = from.evalDouble(variables(e, "TO" to bound(raw, "Min", "pMin")))
+                val b = from.evalDouble(variables(e, "TO" to bound(raw, "Max", "pMax")))
+                return if (literal == "Min") minOf(a, b) else maxOf(a, b)
+            }
             e = node(pointerOrNull(e, "pValue") ?: return if (literal == "Min") Double.NEGATIVE_INFINITY else Double.POSITIVE_INFINITY)
         }
         throw GenicamException("$name: too many hops looking for $literal")

@@ -205,6 +205,23 @@
             android:textStyle="bold"
             android:visibility="gone" />
 
+        <!-- The Lucid Triton's raw HDR frame, when the capture has one. -->
+        <TextView
+            android:id="@+id/source_lucid"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/mode_pill"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/source_lucid"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
         <!-- An HDR burst: the merge, or one of its brackets. Hidden for a single pair. -->
         <TextView
             android:id="@+id/toggle_frame"

@@ -15,6 +15,7 @@ import com.cgjnkim.mobile_jai.calib.CalibStore
 import com.cgjnkim.mobile_jai.calib.DepthProjection
 import com.cgjnkim.mobile_jai.calib.DepthSample
 import com.cgjnkim.mobile_jai.helios.Registration
+import com.cgjnkim.mobile_jai.helios.TritonDisplay
 import com.cgjnkim.mobile_jai.databinding.ActivityViewerBinding
 import com.cgjnkim.mobile_jai.helios.DepthRenderer
 import com.cgjnkim.mobile_jai.jai.DefectFix
@@ -43,7 +44,7 @@ class ViewerActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private val peekWorker = Executors.newSingleThreadExecutor()
 
-    private enum class Source { RGB, NIR, DEPTH }
+    private enum class Source { RGB, NIR, DEPTH, LUCID }
 
     private var entries: List<CaptureEntry> = emptyList()
     private var index = 0
@@ -89,6 +90,9 @@ class ViewerActivity : AppCompatActivity() {
     ) {
         /** All of the Helios's frame, read when first projected. */
         var depthSample: DepthSample? = null
+
+        /** The Lucid Triton's 24-bit counts, read when first looked at: 21 MB as floats. */
+        var lucid: TiffReader.FloatRaw? = null
         val isHdr get() = hdr.isNotEmpty()
         val bracketCount get() = brackets.values.maxOfOrNull { it.size } ?: 0
 
@@ -130,6 +134,7 @@ class ViewerActivity : AppCompatActivity() {
         binding.delete.setOnClickListener { confirmDelete() }
         binding.sourceRgb.setOnClickListener { changeView(Source.RGB, balance) }
         binding.sourceNir.setOnClickListener { changeView(Source.NIR, balance) }
+        binding.sourceLucid.setOnClickListener { changeView(Source.LUCID, balance) }
         binding.sourceDepth.setOnClickListener {
             if (source == Source.DEPTH && activeCalib != null) depthOnJai = !depthOnJai
             changeView(Source.DEPTH, balance)
@@ -217,6 +222,11 @@ class ViewerActivity : AppCompatActivity() {
         }
         // Swiped onto a capture taken without the Helios: fall back to what it does have.
         if (source == Source.DEPTH && entry.depthTiffs.isEmpty()) source = Source.RGB
+        if (source == Source.LUCID && entry.lucidTiff == null) source = Source.RGB
+        // A capture taken with the Lucid alone has nothing else to show.
+        if ((source == Source.RGB || source == Source.NIR) && entry.rgbTiff == null && !entry.isHdr && entry.lucidTiff != null) {
+            source = Source.LUCID
+        }
         showModes()
         val token = ++generation
         loaded = null
@@ -501,6 +511,7 @@ class ViewerActivity : AppCompatActivity() {
 
     /** Whatever the view settings say this capture should look like. */
     private fun drawView(data: Loaded, src: Source, wb: Boolean, frame: Int, step: Int): Bitmap? {
+        if (src == Source.LUCID) return drawLucid(data, step)
         if (src == Source.DEPTH) {
             if (depthOnJai) return drawDepthOnJai(data)
             // Unwrapped when the planes are there to do it with; the Z plane alone otherwise.
@@ -610,6 +621,21 @@ class ViewerActivity : AppCompatActivity() {
     private fun depthSample(entry: CaptureEntry, metadata: JSONObject?): DepthSample? =
         runCatching { CaptureProcessing.depthSample(this, entry, metadata) }.getOrNull()
 
+    /**
+     * The Lucid's raw 24-bit frame made fit to look at (see TritonDisplay.renderRaw): as
+     * the camera sent it, not turned, one pixel per 2x2 cell.
+     */
+    private fun drawLucid(data: Loaded, step: Int): Bitmap? {
+        val raw = data.lucid ?: entries.firstOrNull { it.stamp == data.stamp }?.lucidTiff
+            ?.let { runCatching { CaptureLibrary.readFloatTiff(this, it) }.getOrNull() }
+            ?.also { data.lucid = it } ?: return null
+        val w = raw.width / (2 * step)
+        val h = raw.height / (2 * step)
+        val pixels = IntArray(w * h)
+        TritonDisplay.renderRaw(raw.samples, raw.width, raw.height, pixels, step)
+        return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    }
+
     /** A burst has no single NIR frame; its anchor bracket is the one at the dial's exposure. */
     private fun anchorNir(entry: CaptureEntry, data: Loaded): TiffReader.Raw? {
         val anchor = data.metadata?.optJSONObject("hdr")?.optInt("anchor_index", 0) ?: 0
@@ -659,6 +685,7 @@ class ViewerActivity : AppCompatActivity() {
     }
 
     private fun peekSingle(entry: CaptureEntry, src: Source, wb: Boolean): Bitmap? {
+        if (src == Source.LUCID) return drawLucid(Loaded(entry.stamp, null, null, RawDisplay.Gains.UNITY, null), step = 2)
         if (src == Source.DEPTH) {
             val metadata = CaptureLibrary.metadata(this, entry)
             if (depthOnJai) {
@@ -744,6 +771,9 @@ class ViewerActivity : AppCompatActivity() {
         val quiet = ContextCompat.getColor(this, R.color.camera_quiet)
         binding.sourceRgb.setTextColor(if (source == Source.RGB) accent else white)
         binding.sourceNir.setTextColor(if (source == Source.NIR) accent else white)
+        binding.sourceLucid.setTextColor(if (source == Source.LUCID) accent else white)
+        binding.sourceLucid.visibility =
+            if (entries.getOrNull(index)?.lucidTiff != null) View.VISIBLE else View.GONE
         binding.sourceDepth.setTextColor(if (source == Source.DEPTH) accent else white)
         binding.sourceDepth.setText(
             if (source == Source.DEPTH && depthOnJai && activeCalib != null) R.string.calib_depth_on_jai else R.string.source_depth
@@ -805,12 +835,20 @@ class ViewerActivity : AppCompatActivity() {
         return listOf(
             line("rgb", "RGB"),
             line("nir", "NIR"),
+            *listOfNotNull(describeLucid(m)).toTypedArray(),
             *listOfNotNull(describeDepth(m)).toTypedArray(),
             "%.2f fps · skew %d ns · s/n %s".format(
                 m.optDouble("frame_rate_hz"), m.optLong("skew_ticks"), camera?.optString("serial") ?: "-",
             ),
             getString(R.string.viewer_wb_fmt, data.gains.toString()),
         ).joinToString("\n")
+    }
+
+    private fun describeLucid(m: JSONObject): String? {
+        val l = m.optJSONObject("lucid") ?: return null
+        return "LUCID  %s · %.1f dB · %s 24-bit".format(
+            ExposureStops.formatShutter(l.optDouble("exposure_us").toLong()), l.optDouble("gain_db"), l.optString("hdr_output"),
+        )
     }
 
     private fun describeDepth(m: JSONObject): String? {

@@ -59,18 +59,23 @@ class GvcpControl(
     /**
      * One command, one ack, with retries.
      *
-     * GVCP is UDP, so a lost command and a lost ack look the same; both are retried with
-     * a fresh request id so that a late ack to the previous attempt is recognisably stale
-     * and dropped rather than taken as the answer. A PENDING_ACK extends the wait by the
-     * time the device asks for.
+     * GVCP is UDP, so a lost command and a lost ack look the same; both are retried, each
+     * time with a fresh request id and a longer wait ([TIMEOUTS_MS]). An ack to any of the
+     * attempts is the answer -- they all asked the same thing -- which is what lets a slow
+     * command through: the Triton takes over 1.2 s to change PixelFormat, longer than any
+     * one wait, and answers the first attempt while the later ones are pending. Acks with
+     * an id from before this command are stale and dropped. A PENDING_ACK is the device
+     * saying it is busy; the wait simply goes on.
      */
     private fun transact(cmd: Int, expectAck: Int, payload: ByteArray): Gvcp.Ack = synchronized(lock) {
         var lastError = "no answer"
-        repeat(RETRIES) {
+        val sent = HashSet<Int>()
+        for (timeoutMs in TIMEOUTS_MS) {
             val id = nextId()
+            sent += id
             val out = Gvcp.command(cmd, id, payload)
             socket.send(DatagramPacket(out, out.size, target))
-            val deadline = System.nanoTime() + TIMEOUT_MS * 1_000_000L
+            val deadline = System.nanoTime() + timeoutMs * 1_000_000L
             while (true) {
                 val remaining = (deadline - System.nanoTime()) / 1_000_000L
                 if (remaining <= 0) break
@@ -82,7 +87,7 @@ class GvcpControl(
                     break
                 }
                 val ack = Gvcp.parseAck(rx, packet.length) ?: continue
-                if (ack.requestId != id) continue
+                if (ack.requestId !in sent) continue
                 if (ack.command == Gvcp.PENDING_ACK) continue
                 if (ack.command != expectAck) {
                     lastError = "unexpected ack 0x%04X".format(ack.command)
@@ -248,7 +253,12 @@ class GvcpControl(
     private companion object {
         const val TAG = "JaiGvcp"
         const val TIMEOUT_MS = 300
-        const val RETRIES = 4
+
+        /**
+         * Wait for each attempt: 9.3 s in all before a command is given up. The Triton
+         * takes 4.3 s to change its sensor binning.
+         */
+        val TIMEOUTS_MS = longArrayOf(300, 600, 1200, 2400, 4800)
         const val HEARTBEAT_INTERVAL_MS = 1000L
     }
 }

@@ -24,11 +24,13 @@ class CaptureEntry(
     /** For one half of a flash comparison: "lit" or "ambient", and the other half's stamp. */
     val compareRole: String? = null,
     val partnerStamp: String? = null,
+    /** The Lucid Triton's raw HDR frame (float32 RGGB), when it was connected. */
+    val lucidTiff: Uri? = null,
 ) {
     val isHdr: Boolean get() = hdrTiffs.isNotEmpty()
 
     val uris: List<Uri>
-        get() = listOfNotNull(rgbTiff, nirTiff, preview, metadata) + depthTiffs.values +
+        get() = listOfNotNull(rgbTiff, nirTiff, preview, metadata, lucidTiff) + depthTiffs.values +
             hdrTiffs.values + bracketTiffs.values.flatten()
 }
 
@@ -72,6 +74,7 @@ object CaptureLibrary {
                     nirTiff = files["_nir.tiff"],
                     preview = files["_rgb_preview.jpg"],
                     metadata = files[".json"],
+                    lucidTiff = files["_lucid.tiff"],
                     depthTiffs = files.filterKeys { it.startsWith("_depth_") && it.endsWith(".tiff") }
                         .mapKeys { it.key.removePrefix("_depth_").removeSuffix(".tiff") },
                     hdrTiffs = listOf("rgb", "nir").mapNotNull { l -> files["_${l}_hdr.tiff"]?.let { l to it } }.toMap(),

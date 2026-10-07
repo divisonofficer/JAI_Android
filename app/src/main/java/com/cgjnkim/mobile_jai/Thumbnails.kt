@@ -29,7 +29,7 @@ object Thumbnails {
     fun load(context: Context, entry: CaptureEntry): Bitmap? {
         cache.get(entry.stamp)?.let { return it }
         if (entry.isHdr) return loadHdr(context, entry)
-        val uri = entry.rgbTiff ?: return null
+        val uri = entry.rgbTiff ?: return loadPreview(context, entry)
         return try {
             val raw = CaptureLibrary.readTiff(context, uri)
             DefectRepair.mend(serial(context, entry), JaiCamera.Source.RGB, raw.samples, raw.width, raw.height)
@@ -75,5 +75,20 @@ object Thumbnails {
 
     fun forget(stamp: String) {
         cache.remove(stamp)
+    }
+
+    /** A capture with no JAI pair -- the Lucid Triton's alone -- has only its preview JPEG to show. */
+    private fun loadPreview(context: Context, entry: CaptureEntry): Bitmap? {
+        val uri = entry.preview ?: return null
+        return try {
+            val full = context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return null
+            val small = Bitmap.createScaledBitmap(full, SIZE, SIZE * full.height / full.width, true)
+            if (small !== full) full.recycle()
+            cache.put(entry.stamp, small)
+            small
+        } catch (e: Exception) {
+            Log.w(TAG, "preview thumbnail of ${entry.stamp}", e)
+            null
+        }
     }
 }

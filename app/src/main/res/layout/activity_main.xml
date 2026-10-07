@@ -121,6 +121,50 @@
 
     </LinearLayout>
 
+    <!-- The Lucid Triton HDR colour camera, a row below the Helios's: a tap reconnects. -->
+    <LinearLayout
+        android:id="@+id/chip_lucid"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/mode_pill"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        app:layout_constraintStart_toStartOf="@id/chip_camera"
+        app:layout_constraintTop_toBottomOf="@id/chip_depth">
+
+        <View
+            android:id="@+id/dot_lucid"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="@drawable/status_dot" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="7dp"
+            android:letterSpacing="0.06"
+            android:text="@string/camera_lucid"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/lucid_info"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            tools:text="2.0 fps · 10.240.171.238" />
+
+    </LinearLayout>
+
     <!-- The flash controller: the dot is its link (yellow while lit), a tap reconnects. -->
     <LinearLayout
         android:id="@+id/chip_light"
@@ -422,6 +466,24 @@
             android:paddingHorizontal="14dp"
             android:paddingVertical="7dp"
             android:text="@string/source_depth"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- The Lucid Triton's preview; while shown, the dial sets its shutter and gain. -->
+        <TextView
+            android:id="@+id/source_lucid"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:letterSpacing="0.08"
+            android:maxLines="1"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/source_lucid"
             android:textColor="@android:color/white"
             android:textSize="13sp"
             android:textStyle="bold" />
