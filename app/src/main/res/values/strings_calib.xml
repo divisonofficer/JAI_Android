@@ -25,7 +25,8 @@
     <string name="calib_clear_message">%1$d pairs picked on %2$s are dropped from the fit. Pairs on other captures stay.</string>
     <string name="calib_no_depth">This capture has no depth frame</string>
     <string name="calib_no_depth_here">No depth measured there: pick a lit, flat spot</string>
-    <string name="calib_pick_jai">Now tap the same spot in the JAI image</string>
+    <string name="calib_pick_target_fmt">Now tap the same spot in the %1$s image</string>
+    <string name="calib_depth_on_lucid">DEPTH→LUCID</string>
     <string name="calib_pick_helios">Now tap the same spot in the ToF image</string>
     <string name="calib_exported_fmt">Wrote %1$s to Documents/MobileJai/calib</string>
     <string name="calib_hint">Tap a spot in one image, then the same spot in the other. Pinch or double-tap to zoom, long-press a point to remove it.</string>

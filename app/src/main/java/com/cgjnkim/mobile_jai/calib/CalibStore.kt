@@ -10,12 +10,25 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * One hand-picked correspondence: a pixel of a saved JAI image and the Helios point
- * under the matching pixel of the same capture's depth frame.
+ * The camera a calibration registers the Helios to. Each keeps its own pairs, fit and
+ * active calibration; the JAI's stay where they were before there was a choice.
+ */
+enum class CalibTarget(val folder: String, val label: String) {
+    /** The saved upright 1080x1080 JAI square. */
+    JAI("calib", "JAI"),
+
+    /** The Lucid Triton's raw frame at one pixel per 2x2 Bayer cell (1440x930), as sent, not turned. */
+    LUCID("calib/lucid", "LUCID"),
+}
+
+/**
+ * One hand-picked correspondence: a pixel of a saved colour image (the target's: see
+ * [CalibTarget]) and the Helios point under the matching pixel of the same capture's
+ * depth frame.
  */
 data class PointPair(
     val stamp: String,
-    /** JAI image pixel, centres on integers, in the saved upright square. */
+    /** Target image pixel, centres on integers. Stored as "jai_px" whatever the target, as it always was. */
     val u: Double, val v: Double,
     /** Helios pixel it was picked at, for drawing it again. */
     val hx: Double, val hy: Double,
@@ -55,71 +68,72 @@ data class PointPair(
  */
 object CalibStore {
 
-    private fun dir(context: Context) = File(context.filesDir, "calib").apply { mkdirs() }
-    private fun pairsFile(context: Context) = File(dir(context), "pairs.json")
-    private fun registrationFile(context: Context) = File(dir(context), "registration.json")
-    private fun activeFile(context: Context) = File(dir(context), "active.json")
+    private fun dir(context: Context, target: CalibTarget) = File(context.filesDir, target.folder).apply { mkdirs() }
+    private fun pairsFile(context: Context, target: CalibTarget) = File(dir(context, target), "pairs.json")
+    private fun registrationFile(context: Context, target: CalibTarget) = File(dir(context, target), "registration.json")
+    private fun activeFile(context: Context, target: CalibTarget) = File(dir(context, target), "active.json")
 
-    /** The calibration the app uses, with its name; null before one is saved. */
-    fun loadActive(context: Context): Pair<String, Registration>? = activeFile(context).takeIf { it.exists() }?.let {
-        runCatching {
-            val j = JSONObject(it.readText())
-            j.optString("name", "?") to Registration.fromJson(j)
-        }.getOrNull()
-    }
+    /** The calibration the app uses for [target], with its name; null before one is saved. */
+    fun loadActive(context: Context, target: CalibTarget = CalibTarget.JAI): Pair<String, Registration>? =
+        activeFile(context, target).takeIf { it.exists() }?.let {
+            runCatching {
+                val j = JSONObject(it.readText())
+                j.optString("name", "?") to Registration.fromJson(j)
+            }.getOrNull()
+        }
 
     /** Makes [reg] the active calibration as the next version; returns its name. */
-    fun saveActive(context: Context, reg: Registration, note: String): String {
-        val previous = loadActive(context)?.first?.removePrefix("v")?.toIntOrNull() ?: 0
+    fun saveActive(context: Context, target: CalibTarget, reg: Registration, note: String): String {
+        val previous = loadActive(context, target)?.first?.removePrefix("v")?.toIntOrNull() ?: 0
         val name = "v${previous + 1}"
         val j = reg.toJson().apply {
             put("name", name)
             put("created", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date()))
             put("note", note)
         }
-        activeFile(context).writeText(j.toString(2))
+        activeFile(context, target).writeText(j.toString(2))
         return name
     }
 
-    private fun exclusionFile(context: Context) = File(dir(context), "exclusions.json")
+    private fun exclusionFile(context: Context, target: CalibTarget) = File(dir(context, target), "exclusions.json")
 
     /**
      * The user's own word on which captures are in the fit: stamp to excluded or not.
      * A capture without one follows its default (see CalibActivity).
      */
-    fun loadExclusions(context: Context): MutableMap<String, Boolean> {
-        val f = exclusionFile(context)
+    fun loadExclusions(context: Context, target: CalibTarget): MutableMap<String, Boolean> {
+        val f = exclusionFile(context, target)
         if (!f.exists()) return mutableMapOf()
         val o = runCatching { JSONObject(f.readText()) }.getOrNull() ?: return mutableMapOf()
         return o.keys().asSequence().associateWith { o.getBoolean(it) }.toMutableMap()
     }
 
-    fun saveExclusions(context: Context, decisions: Map<String, Boolean>) {
-        exclusionFile(context).writeText(JSONObject(decisions as Map<*, *>).toString(1))
+    fun saveExclusions(context: Context, target: CalibTarget, decisions: Map<String, Boolean>) {
+        exclusionFile(context, target).writeText(JSONObject(decisions as Map<*, *>).toString(1))
     }
 
-    fun loadPairs(context: Context): MutableList<PointPair> {
-        val f = pairsFile(context)
+    fun loadPairs(context: Context, target: CalibTarget): MutableList<PointPair> {
+        val f = pairsFile(context, target)
         if (!f.exists()) return mutableListOf()
         val a = runCatching { JSONArray(f.readText()) }.getOrNull() ?: return mutableListOf()
         return MutableList(a.length()) { PointPair.fromJson(a.getJSONObject(it)) }
     }
 
-    fun savePairs(context: Context, pairs: List<PointPair>) {
-        pairsFile(context).writeText(JSONArray(pairs.map { it.toJson() }).toString(1))
+    fun savePairs(context: Context, target: CalibTarget, pairs: List<PointPair>) {
+        pairsFile(context, target).writeText(JSONArray(pairs.map { it.toJson() }).toString(1))
     }
 
-    fun loadRegistration(context: Context): Registration? = registrationFile(context).takeIf { it.exists() }?.let {
+    fun loadRegistration(context: Context, target: CalibTarget): Registration? = registrationFile(context, target).takeIf { it.exists() }?.let {
         runCatching { Registration.fromJson(JSONObject(it.readText())) }.getOrNull()
     }
 
-    fun saveRegistration(context: Context, reg: Registration?) {
-        val f = registrationFile(context)
+    fun saveRegistration(context: Context, target: CalibTarget, reg: Registration?) {
+        val f = registrationFile(context, target)
         if (reg == null) f.delete() else f.writeText(reg.toJson().toString(2))
     }
 
     /** Copies the pairs and the registration to Documents/MobileJai/calib/; returns the names written. */
-    fun export(context: Context, stamp: String, pairs: List<PointPair>, reg: Registration?): List<String> {
+    fun export(context: Context, target: CalibTarget, stamp: String, pairs: List<PointPair>, reg: Registration?): List<String> {
         val written = mutableListOf<String>()
         val files = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         fun write(name: String, body: String) {
@@ -132,8 +146,10 @@ object CalibStore {
             context.contentResolver.openOutputStream(uri)?.use { it.write(body.toByteArray()) }
             written += name
         }
-        write("calib_${stamp}_pairs.json", JSONArray(pairs.map { it.toJson() }).toString(1))
-        reg?.let { write("calib_${stamp}_registration.json", it.toJson().toString(2)) }
+        // The JAI's names as they were; another target's say which it is.
+        val prefix = if (target == CalibTarget.JAI) "calib_$stamp" else "calib_${target.label.lowercase()}_$stamp"
+        write("${prefix}_pairs.json", JSONArray(pairs.map { it.toJson() }).toString(1))
+        reg?.let { write("${prefix}_registration.json", it.toJson().toString(2)) }
         return written
     }
 

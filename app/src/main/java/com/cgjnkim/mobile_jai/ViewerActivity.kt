@@ -12,6 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.cgjnkim.mobile_jai.calib.CalibActivity
 import com.cgjnkim.mobile_jai.calib.CalibStore
+import com.cgjnkim.mobile_jai.calib.CalibTarget
 import com.cgjnkim.mobile_jai.calib.DepthProjection
 import com.cgjnkim.mobile_jai.calib.DepthSample
 import com.cgjnkim.mobile_jai.helios.Registration
@@ -51,12 +52,14 @@ class ViewerActivity : AppCompatActivity() {
     private var source = Source.RGB
 
     /**
-     * DEPTH shown from the JAI rather than the Helios: projected through the active
-     * calibration (see [CalibStore.loadActive]) onto the capture's NIR picture. Tapping
-     * DEPTH again while it is shown switches; only when a calibration has been saved.
+     * DEPTH shown from a colour camera rather than the Helios: projected through that
+     * camera's active calibration (see [CalibStore.loadActive]) onto its picture -- the
+     * JAI's NIR, or the Lucid's frame. Null for the Helios's own view. Tapping DEPTH again
+     * while it is shown steps through the ones this capture has a picture and a
+     * calibration for.
      */
-    private var depthOnJai = false
-    @Volatile private var activeCalib: Pair<String, Registration>? = null
+    private var depthOn: CalibTarget? = null
+    @Volatile private var activeCalibs: Map<CalibTarget, Pair<String, Registration>> = emptyMap()
     private var balance = true
 
     /** For an HDR burst: [HDR_FRAME] for the merge, or a bracket's index. */
@@ -136,12 +139,17 @@ class ViewerActivity : AppCompatActivity() {
         binding.sourceNir.setOnClickListener { changeView(Source.NIR, balance) }
         binding.sourceLucid.setOnClickListener { changeView(Source.LUCID, balance) }
         binding.sourceDepth.setOnClickListener {
-            if (source == Source.DEPTH && activeCalib != null) depthOnJai = !depthOnJai
+            if (source == Source.DEPTH) depthOn = nextDepthView()
             changeView(Source.DEPTH, balance)
         }
         binding.calib.setOnClickListener {
             entries.getOrNull(index)?.let { e ->
-                startActivity(Intent(this, CalibActivity::class.java).putExtra(CalibActivity.EXTRA_STAMP, e.stamp))
+                // The Lucid's calibration from its own view or a capture with only it.
+                val lucid = e.lucidTiff != null &&
+                    (source == Source.LUCID || depthOn == CalibTarget.LUCID || (e.rgbTiff == null && e.nirTiff == null))
+                startActivity(Intent(this, CalibActivity::class.java)
+                    .putExtra(CalibActivity.EXTRA_STAMP, e.stamp)
+                    .putExtra(CalibActivity.EXTRA_TARGET, (if (lucid) CalibTarget.LUCID else CalibTarget.JAI).name))
             }
         }
         binding.toggleWb.setOnClickListener { changeView(source, !balance) }
@@ -168,15 +176,15 @@ class ViewerActivity : AppCompatActivity() {
         }
     }
 
-    /** The active calibration may have changed on the calibration screen; a projected view follows it. */
+    /** The active calibrations may have changed on the calibration screen; a projected view follows them. */
     override fun onResume() {
         super.onResume()
         worker.execute {
-            val calib = CalibStore.loadActive(this)
+            val calibs = CalibTarget.values().mapNotNull { t -> CalibStore.loadActive(this, t)?.let { t to it } }.toMap()
             main.post {
-                val changed = calib?.first != activeCalib?.first
-                activeCalib = calib
-                if (calib == null) depthOnJai = false
+                val changed = calibs.mapValues { it.value.first } != activeCalibs.mapValues { it.value.first }
+                activeCalibs = calibs
+                if (depthOn != null && depthOn !in calibs) depthOn = null
                 showModes()
                 if (changed && source == Source.DEPTH && loaded != null) render(quickFirst = false)
             }
@@ -192,7 +200,19 @@ class ViewerActivity : AppCompatActivity() {
     /** The view settings a picture was rendered under; a peek from other settings is stale. */
     private fun viewKey(src: Source = source, wb: Boolean = balance) =
         "$src/${if (src == Source.RGB) wb else false}/${evMilli ?: "tone"}${if (active) "/active" else ""}" +
-            if (src == Source.DEPTH && depthOnJai) "/onjai/${activeCalib?.first}" else ""
+            (depthOn?.takeIf { src == Source.DEPTH }?.let { "/on$it/${activeCalibs[it]?.first}" } ?: "")
+
+    /** The DEPTH view after the one shown: the Helios's, then each camera this capture can be projected onto. */
+    private fun nextDepthView(): CalibTarget? {
+        val e = entries.getOrNull(index) ?: return null
+        val views = listOf(null) + CalibTarget.values().filter { t ->
+            t in activeCalibs && when (t) {
+                CalibTarget.JAI -> e.nirTiff != null || e.rgbTiff != null || e.bracketTiffs.isNotEmpty()
+                CalibTarget.LUCID -> e.lucidTiff != null
+            }
+        }
+        return views[(views.indexOf(depthOn) + 1) % views.size]
+    }
 
     // ---- current capture ------------------------------------------------------------
 
@@ -513,7 +533,11 @@ class ViewerActivity : AppCompatActivity() {
     private fun drawView(data: Loaded, src: Source, wb: Boolean, frame: Int, step: Int): Bitmap? {
         if (src == Source.LUCID) return drawLucid(data, step)
         if (src == Source.DEPTH) {
-            if (depthOnJai) return drawDepthOnJai(data)
+            when (depthOn) {
+                CalibTarget.JAI -> return drawDepthOnJai(data)
+                CalibTarget.LUCID -> return drawDepthOnLucid(data)
+                null -> {}
+            }
             // Unwrapped when the planes are there to do it with; the Z plane alone otherwise.
             val entry = entries.firstOrNull { it.stamp == data.stamp }
             val sample = data.depthSample ?: entry?.let { depthSample(it, data.metadata) }?.also { data.depthSample = it }
@@ -602,7 +626,7 @@ class ViewerActivity : AppCompatActivity() {
      * capture's NIR picture (a burst's anchor bracket), coloured near-to-far.
      */
     private fun drawDepthOnJai(data: Loaded): Bitmap? {
-        val calib = activeCalib?.second ?: return null
+        val calib = activeCalibs[CalibTarget.JAI]?.second ?: return null
         val entry = entries.firstOrNull { it.stamp == data.stamp } ?: return null
         val sample = data.depthSample ?: depthSample(entry, data.metadata)?.also { data.depthSample = it } ?: return null
         val base = data.nir ?: anchorNir(entry, data) ?: data.rgb
@@ -613,6 +637,25 @@ class ViewerActivity : AppCompatActivity() {
             if (base === data.rgb) RawDisplay.renderBayer(base.samples, w, h, data.gains, pixels)
             else RawDisplay.renderMono(base.samples, w, h, pixels)
         } else pixels.fill(0xFF000000.toInt())
+        DepthProjection.render(sample, calib, pixels, w, h)
+        return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    /**
+     * The depth as the Lucid sees it: projected through its active calibration onto its
+     * frame, one pixel per 2x2 cell as calibrated (see [CalibTarget.LUCID]).
+     */
+    private fun drawDepthOnLucid(data: Loaded): Bitmap? {
+        val calib = activeCalibs[CalibTarget.LUCID]?.second ?: return null
+        val entry = entries.firstOrNull { it.stamp == data.stamp } ?: return null
+        val sample = data.depthSample ?: depthSample(entry, data.metadata)?.also { data.depthSample = it } ?: return null
+        val raw = data.lucid ?: entry.lucidTiff?.let { runCatching { CaptureLibrary.readFloatTiff(this, it) }.getOrNull() }
+            ?.also { data.lucid = it }
+        val w = calib.imageWidth
+        val h = calib.imageHeight
+        val pixels = IntArray(w * h)
+        if (raw != null && raw.width / 2 == w && raw.height / 2 == h) TritonDisplay.renderRaw(raw.samples, raw.width, raw.height, pixels)
+        else pixels.fill(0xFF000000.toInt())
         DepthProjection.render(sample, calib, pixels, w, h)
         return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
     }
@@ -688,10 +731,11 @@ class ViewerActivity : AppCompatActivity() {
         if (src == Source.LUCID) return drawLucid(Loaded(entry.stamp, null, null, RawDisplay.Gains.UNITY, null), step = 2)
         if (src == Source.DEPTH) {
             val metadata = CaptureLibrary.metadata(this, entry)
-            if (depthOnJai) {
+            if (depthOn == CalibTarget.JAI) {
                 val nir = entry.nirTiff?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
                 return drawDepthOnJai(Loaded(entry.stamp, null, nir, RawDisplay.Gains.UNITY, metadata))
             }
+            if (depthOn == CalibTarget.LUCID) return drawDepthOnLucid(Loaded(entry.stamp, null, null, RawDisplay.Gains.UNITY, metadata))
             val sample = depthSample(entry, metadata) ?: return null
             return drawDepth(sample, metadata)
         }
@@ -776,7 +820,11 @@ class ViewerActivity : AppCompatActivity() {
             if (entries.getOrNull(index)?.lucidTiff != null) View.VISIBLE else View.GONE
         binding.sourceDepth.setTextColor(if (source == Source.DEPTH) accent else white)
         binding.sourceDepth.setText(
-            if (source == Source.DEPTH && depthOnJai && activeCalib != null) R.string.calib_depth_on_jai else R.string.source_depth
+            when (depthOn?.takeIf { source == Source.DEPTH && it in activeCalibs }) {
+                CalibTarget.JAI -> R.string.calib_depth_on_jai
+                CalibTarget.LUCID -> R.string.calib_depth_on_lucid
+                null -> R.string.source_depth
+            }
         )
         binding.calib.visibility =
             if (entries.getOrNull(index)?.depthTiffs?.isNotEmpty() == true) View.VISIBLE else View.GONE

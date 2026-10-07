@@ -14,6 +14,7 @@ import com.cgjnkim.mobile_jai.TiffReader
 import com.cgjnkim.mobile_jai.databinding.ActivityCalibBinding
 import com.cgjnkim.mobile_jai.helios.DepthRenderer
 import com.cgjnkim.mobile_jai.helios.Registration
+import com.cgjnkim.mobile_jai.helios.TritonDisplay
 import com.cgjnkim.mobile_jai.jai.RawDisplay
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -41,6 +42,10 @@ import kotlin.math.sqrt
  *
  * The overlay paints the depth frame into the JAI image through the current fit, which
  * is the check that matters.
+ *
+ * The same, with [EXTRA_TARGET] LUCID, registers the Helios to the Lucid Triton instead:
+ * its raw frame of the capture in place of the JAI's, at one pixel per 2x2 cell, and a
+ * calibration of its own (see [CalibTarget]).
  */
 class CalibActivity : AppCompatActivity() {
 
@@ -49,6 +54,7 @@ class CalibActivity : AppCompatActivity() {
     private val worker = Executors.newSingleThreadExecutor()
 
     private lateinit var stamp: String
+    private lateinit var target: CalibTarget
 
     /** Captures that have a depth frame, newest first: what prev and next step through. */
     private var scenes: List<String> = emptyList()
@@ -62,6 +68,14 @@ class CalibActivity : AppCompatActivity() {
     /** The JAI pictures of the capture shown. */
     private var nir: TiffReader.Raw? = null
     private var rgb: TiffReader.Raw? = null
+
+    /** The Lucid's, when that is the target. */
+    private var lucid: TiffReader.FloatRaw? = null
+
+    /** The size of the target picture picks are made in. */
+    private val imageSize: Pair<Int, Int>?
+        get() = lucid?.let { it.width / 2 to it.height / 2 }
+            ?: nir?.let { it.width to it.height } ?: rgb?.let { it.width to it.height }
     private val scene: Scene? get() = sceneCache[stamp]
 
     private var pairs = mutableListOf<PointPair>()
@@ -93,9 +107,10 @@ class CalibActivity : AppCompatActivity() {
         binding = ActivityCalibBinding.inflate(layoutInflater)
         setContentView(binding.root)
         stamp = intent.getStringExtra(EXTRA_STAMP) ?: run { finish(); return }
+        target = intent.getStringExtra(EXTRA_TARGET)?.let { runCatching { CalibTarget.valueOf(it) }.getOrNull() } ?: CalibTarget.JAI
 
         binding.back.setOnClickListener { finish() }
-        binding.toggleJai.setOnClickListener { showRgb = !showRgb; drawJai() }
+        binding.toggleJai.setOnClickListener { if (target == CalibTarget.JAI) { showRgb = !showRgb; drawJai() } }
         binding.toggleTof.setOnClickListener { showTofDepth = !showTofDepth; drawTof() }
         binding.toggleOverlay.setOnClickListener { overlay = !overlay; drawJai() }
         binding.toggleRobust.setOnClickListener { robust = !robust; showModes(); solve() }
@@ -113,11 +128,12 @@ class CalibActivity : AppCompatActivity() {
         showModes()
         binding.status.text = getString(R.string.calib_hint)
 
-        pairs = CalibStore.loadPairs(this)
-        exclusions = CalibStore.loadExclusions(this)
+        pairs = CalibStore.loadPairs(this, target)
+        exclusions = CalibStore.loadExclusions(this, target)
         open(stamp)
         worker.execute {
-            val list = CaptureLibrary.list(this).filter { it.depthTiffs.isNotEmpty() }.map { it.stamp }
+            val list = CaptureLibrary.list(this)
+                .filter { it.depthTiffs.isNotEmpty() && (target != CalibTarget.LUCID || it.lucidTiff != null) }.map { it.stamp }
             main.post { scenes = list; showTitle() }
         }
     }
@@ -134,6 +150,7 @@ class CalibActivity : AppCompatActivity() {
         stamp = s
         nir = null
         rgb = null
+        lucid = null
         pendingJai = null
         pendingTof = null
         showTitle()
@@ -141,22 +158,24 @@ class CalibActivity : AppCompatActivity() {
         binding.jaiView.bitmap = null
         binding.heliosView.bitmap = null
         worker.execute {
-            val pictures = runCatching { loadJai(s) }.onFailure { Log.e(TAG, "loading $s", it) }.getOrNull()
+            val pictures = if (target == CalibTarget.JAI) runCatching { loadJai(s) }.onFailure { Log.e(TAG, "loading $s", it) }.getOrNull() else null
+            val lucidFrame = if (target == CalibTarget.LUCID) runCatching { loadLucid(s) }.onFailure { Log.e(TAG, "loading $s", it) }.getOrNull() else null
             val depth = loadScene(s)
             // Every capture with pairs, so their 3D points can be read the precise way.
             for (other in pairs.map { it.stamp }.distinct()) loadScene(other)
             val refreshed = refreshPoints(pairs.toList())
             main.post {
                 if (s != stamp) return@post
-                if (pictures == null || depth == null) {
+                if ((pictures == null && lucidFrame == null) || depth == null) {
                     binding.status.text = getString(R.string.calib_no_depth)
                     return@post
                 }
-                nir = pictures.first
-                rgb = pictures.second
+                nir = pictures?.first
+                rgb = pictures?.second
+                lucid = lucidFrame
                 if (refreshed != null && refreshed.size == pairs.size) {
                     pairs = refreshed.toMutableList()
-                    CalibStore.savePairs(this, pairs)
+                    CalibStore.savePairs(this, target, pairs)
                 }
                 drawJai()
                 drawTof()
@@ -175,6 +194,11 @@ class CalibActivity : AppCompatActivity() {
         val n = jai("nir")?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
         val r = jai("rgb")?.let { runCatching { CaptureLibrary.readTiff(this, it) }.getOrNull() }
         return if (n == null && r == null) null else n to r
+    }
+
+    private fun loadLucid(s: String): TiffReader.FloatRaw? {
+        val uri = CaptureLibrary.list(this).firstOrNull { it.stamp == s }?.lucidTiff ?: return null
+        return CaptureLibrary.readFloatTiff(this, uri)
     }
 
     /** On [worker]. */
@@ -207,19 +231,28 @@ class CalibActivity : AppCompatActivity() {
 
     // ---- drawing --------------------------------------------------------------------
 
+    /** The target's picture: the JAI's NIR or RGB, or the Lucid's frame. */
     private fun drawJai() {
+        val l = lucid
+        if (l != null) return drawTarget(l.width / 2, l.height / 2) { px -> TritonDisplay.renderRaw(l.samples, l.width, l.height, px) }
         val src = (if (showRgb) rgb else nir) ?: nir ?: rgb ?: return
         val bayer = showRgb && rgb != null
+        drawTarget(src.width, src.height) { px ->
+            if (bayer) RawDisplay.renderBayer(src.samples, src.width, src.height,
+                RawDisplay.grayWorldGains(src.samples, src.width, src.height), px)
+            else RawDisplay.renderMono(src.samples, src.width, src.height, px)
+        }
+    }
+
+    private fun drawTarget(width: Int, height: Int, paint: (IntArray) -> Unit) {
         val sc = scene
         val r = reg.takeIf { overlay }
         showModes()
         worker.execute {
-            val px = IntArray(src.width * src.height)
-            if (bayer) RawDisplay.renderBayer(src.samples, src.width, src.height,
-                RawDisplay.grayWorldGains(src.samples, src.width, src.height), px)
-            else RawDisplay.renderMono(src.samples, src.width, src.height, px)
-            if (r != null && sc != null) DepthProjection.render(sc.depth, r, px, src.width, src.height)
-            val bm = Bitmap.createBitmap(px, src.width, src.height, Bitmap.Config.ARGB_8888)
+            val px = IntArray(width * height)
+            paint(px)
+            if (r != null && sc != null) DepthProjection.render(sc.depth, r, px, width, height)
+            val bm = Bitmap.createBitmap(px, width, height, Bitmap.Config.ARGB_8888)
             main.post { binding.jaiView.bitmap = bm; showMarks() }
         }
     }
@@ -272,7 +305,8 @@ class CalibActivity : AppCompatActivity() {
     private fun showModes() {
         val accent = ContextCompat.getColor(this, R.color.camera_accent)
         val white = ContextCompat.getColor(this, android.R.color.white)
-        binding.toggleJai.setText(if (showRgb) R.string.calib_jai_rgb else R.string.calib_jai_nir)
+        if (target == CalibTarget.LUCID) binding.toggleJai.setText(R.string.source_lucid)
+        else binding.toggleJai.setText(if (showRgb) R.string.calib_jai_rgb else R.string.calib_jai_nir)
         binding.toggleTof.setText(if (showTofDepth) R.string.calib_tof_depth else R.string.calib_tof_intensity)
         binding.toggleOverlay.setTextColor(if (overlay) accent else white)
         binding.toggleOverlay.isEnabled = reg != null
@@ -305,7 +339,7 @@ class CalibActivity : AppCompatActivity() {
 
     private fun toggleExcluded() {
         exclusions[stamp] = !isExcluded(stamp)
-        CalibStore.saveExclusions(this, exclusions)
+        CalibStore.saveExclusions(this, target, exclusions)
         showModes()
         solve()
     }
@@ -319,7 +353,7 @@ class CalibActivity : AppCompatActivity() {
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.calib_clear_scene) { _, _ ->
                 pairs.removeAll { it.stamp == stamp }
-                CalibStore.savePairs(this, pairs)
+                CalibStore.savePairs(this, target, pairs)
                 solve()
             }
             .show()
@@ -349,10 +383,10 @@ class CalibActivity : AppCompatActivity() {
             pairs += t.copy(u = j[0], v = j[1])
             pendingJai = null
             pendingTof = null
-            CalibStore.savePairs(this, pairs)
+            CalibStore.savePairs(this, target, pairs)
             solve()
         } else {
-            binding.status.text = getString(if (j != null) R.string.calib_pick_helios else R.string.calib_pick_jai)
+            binding.status.text = if (j != null) getString(R.string.calib_pick_helios) else getString(R.string.calib_pick_target_fmt, target.label)
         }
         showMarks()
     }
@@ -370,7 +404,7 @@ class CalibActivity : AppCompatActivity() {
         val hit = pairs.withIndex().filter { it.value.stamp == stamp }.minByOrNull { dist(it.value) } ?: return
         if (dist(hit.value) > reach) return
         pairs.removeAt(hit.index)
-        CalibStore.savePairs(this, pairs)
+        CalibStore.savePairs(this, target, pairs)
         solve()
     }
 
@@ -384,7 +418,7 @@ class CalibActivity : AppCompatActivity() {
         val last = pairs.indexOfLast { it.stamp == stamp }
         if (last < 0) return
         pairs.removeAt(last)
-        CalibStore.savePairs(this, pairs)
+        CalibStore.savePairs(this, target, pairs)
         solve()
     }
 
@@ -395,8 +429,7 @@ class CalibActivity : AppCompatActivity() {
         val all = pairs.toList()
         val out = all.map { it.stamp }.filter { isExcluded(it) }.toSet()
         val useRobust = robust
-        val w = nir?.width ?: rgb?.width ?: return
-        val h = nir?.height ?: rgb?.height ?: return
+        val (w, h) = imageSize ?: return
         worker.execute {
             val use = all.indices.filter { all[it].stamp !in out }
             val fit = fit(all, use, useRobust, w, h)
@@ -407,7 +440,7 @@ class CalibActivity : AppCompatActivity() {
                 ?: DoubleArray(all.size) { Double.NaN }
             val sp = if (use.size >= 3) Registration.spread(use.map { pts[it] }) else Double.NaN
             val fits = sceneFits(all, use, inl, e, useRobust, w, h)
-            CalibStore.saveRegistration(this, r)
+            CalibStore.saveRegistration(this, target, r)
             main.post {
                 if (all.size != pairs.size) return@post // picked again meanwhile; that solve follows
                 reg = r
@@ -496,7 +529,7 @@ class CalibActivity : AppCompatActivity() {
     /** Makes the current fit the one the app projects depth with, as the next version. */
     private fun confirmSave() {
         val r = reg ?: return
-        val active = CalibStore.loadActive(this)?.first
+        val active = CalibStore.loadActive(this, target)?.first
         AlertDialog.Builder(this)
             .setTitle(R.string.calib_save_title)
             .setMessage(getString(R.string.calib_save_message, r.pairs, r.rmsPx, active ?: "-"))
@@ -505,7 +538,7 @@ class CalibActivity : AppCompatActivity() {
                 val scenes = pairs.map { it.stamp }.distinct().filter { !isExcluded(it) }
                 val note = "${r.pairs} pairs from ${scenes.joinToString(", ")}; " +
                     "${Registration.Model.forPairs(r.pairs).label}; robust ${if (robust) "on" else "off"}"
-                val name = CalibStore.saveActive(this, r, note)
+                val name = CalibStore.saveActive(this, target, r, note)
                 binding.status.text = getString(R.string.calib_saved_fmt, name)
             }
             .show()
@@ -515,7 +548,7 @@ class CalibActivity : AppCompatActivity() {
         val all = pairs.toList()
         val r = reg
         worker.execute {
-            val names = runCatching { CalibStore.export(this, stamp, all, r) }
+            val names = runCatching { CalibStore.export(this, target, stamp, all, r) }
                 .onFailure { Log.e(TAG, "export", it) }.getOrDefault(emptyList())
             main.post {
                 binding.status.text = if (names.isEmpty()) "export failed"
@@ -526,6 +559,9 @@ class CalibActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_STAMP = "stamp"
+
+        /** A [CalibTarget] name; JAI when absent. */
+        const val EXTRA_TARGET = "target"
         private const val TAG = "Calib"
 
         /** Helios2 ABCY16 when a capture's metadata does not say: 0.25 mm, X and Y centred. */
