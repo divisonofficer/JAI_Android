@@ -74,6 +74,7 @@ object GigeDiscovery {
     private const val TAG = "JaiDiscovery"
     private const val ACK_SIZE = 248
     private const val DEFAULT_WAIT_MS = 600
+    private const val BIND_ATTEMPTS = 5
 
     /** Interface names Android's EthernetTracker claims: eth0, usb0 and the like. */
     private val ETHERNET_NAME = Regex("""(eth|usb)\d+""")
@@ -107,20 +108,63 @@ object GigeDiscovery {
      */
     fun discover(link: EthernetLink, waitMs: Int = DEFAULT_WAIT_MS): List<GigeDeviceInfo> {
         val found = LinkedHashMap<String, GigeDeviceInfo>()
+        val (tx, rx) = openPair(link)
+        try {
+            collect(tx, rx, waitMs, found)
+        } finally {
+            rx?.close()
+            tx.close()
+        }
+        Log.i(TAG, "discovered ${found.size} on $link: ${found.values}")
+        return found.values.toList()
+    }
+
+    /**
+     * The sending socket on an ephemeral port of [link]'s address, and the wildcard socket
+     * on the same port.
+     *
+     * The wildcard bind can fail with "address already in use": the kernel chose the
+     * port as free on the link's address, but another socket -- another discovery running
+     * at the same moment, or any socket bound to that port on another address -- can
+     * still hold it for the wildcard. A fresh port is tried a few times; failing that,
+     * discovery goes on with the bound socket alone, which still hears every camera
+     * already in the subnet.
+     */
+    private fun openPair(link: EthernetLink): Pair<DatagramChannel, DatagramChannel?> {
+        var last: java.io.IOException? = null
+        repeat(BIND_ATTEMPTS) {
+            val tx = DatagramChannel.open().apply {
+                socket().reuseAddress = true
+                socket().broadcast = true
+                bind(InetSocketAddress(link.address, 0))
+                configureBlocking(false)
+            }
+            val rx = DatagramChannel.open()
+            try {
+                rx.socket().reuseAddress = true
+                rx.bind(InetSocketAddress(tx.socket().localPort))
+                rx.configureBlocking(false)
+                return tx to rx
+            } catch (e: java.io.IOException) {
+                last = e
+                rx.close()
+                tx.close()
+            }
+        }
+        Log.w(TAG, "no wildcard socket after $BIND_ATTEMPTS ports; broadcast acks will be missed", last)
         val tx = DatagramChannel.open().apply {
             socket().reuseAddress = true
             socket().broadcast = true
             bind(InetSocketAddress(link.address, 0))
             configureBlocking(false)
         }
-        val rx = DatagramChannel.open().apply {
-            socket().reuseAddress = true
-            bind(InetSocketAddress(tx.socket().localPort))
-            configureBlocking(false)
-        }
+        return tx to null
+    }
+
+    private fun collect(tx: DatagramChannel, rx: DatagramChannel?, waitMs: Int, found: MutableMap<String, GigeDeviceInfo>) {
         Selector.open().use { selector ->
             tx.register(selector, SelectionKey.OP_READ)
-            rx.register(selector, SelectionKey.OP_READ)
+            rx?.register(selector, SelectionKey.OP_READ)
             val cmd = Gvcp.command(
                 Gvcp.DISCOVERY_CMD, 1, ByteArray(0),
                 flags = Gvcp.FLAG_ACK_REQUIRED or Gvcp.FLAG_ALLOW_BROADCAST_ACK,
@@ -147,10 +191,6 @@ object GigeDiscovery {
                 selector.selectedKeys().clear()
             }
         }
-        rx.close()
-        tx.close()
-        Log.i(TAG, "discovered ${found.size} on $link: ${found.values}")
-        return found.values.toList()
     }
 
     /**
