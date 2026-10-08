@@ -23,6 +23,7 @@ import com.cgjnkim.mobile_jai.jai.DefectFix
 import com.cgjnkim.mobile_jai.jai.HdrMerge
 import com.cgjnkim.mobile_jai.jai.RawDisplay
 import org.json.JSONObject
+import kotlin.math.pow
 import java.util.concurrent.Executors
 
 /**
@@ -96,6 +97,9 @@ class ViewerActivity : AppCompatActivity() {
 
         /** The Lucid Triton's 24-bit counts, read when first looked at: 21 MB as floats. */
         var lucid: TiffReader.FloatRaw? = null
+
+        /** A Lucid flash on/off pair is a single frame each, not a burst: ON, OFF, ACTIVE are of the Lucid. */
+        val isLucidPair get() = !isHdr && metadata?.optJSONObject("compare")?.optString("kind") == "lucid_flash"
         val isHdr get() = hdr.isNotEmpty()
         val bracketCount get() = brackets.values.maxOfOrNull { it.size } ?: 0
 
@@ -398,6 +402,7 @@ class ViewerActivity : AppCompatActivity() {
      */
     private fun cycleCompare() {
         val partner = partnerIndex() ?: return
+        if (loaded?.isLucidPair == true) source = Source.LUCID
         when {
             active -> {
                 active = false
@@ -426,6 +431,7 @@ class ViewerActivity : AppCompatActivity() {
      */
     private fun activeMap(data: Loaded, src: Source): FloatArray? = synchronized(data.activeCache) {
         data.activeCache[src]?.let { return it }
+        if (src == Source.LUCID) return lucidActive(data)
         val lit = data.hdr[src] ?: return null
         val ambientData = data.partner ?: (partnerIndex()?.let { entries[it] } ?: return null).let { loadHdr(it, withPartner = false) }
         val ambient = ambientData.hdr[src] ?: return null
@@ -439,10 +445,32 @@ class ViewerActivity : AppCompatActivity() {
         diff
     }
 
+    /**
+     * ON - OFF of a Lucid flash pair, in counts. Both frames are taken at one exposure and
+     * gain; the ratio of the two halves' recorded settings still scales the OFF frame, so
+     * the difference stays right if they ever differ. Called with [Loaded.activeCache] held.
+     */
+    private fun lucidActive(data: Loaded): FloatArray? {
+        val on = lucidRaw(data) ?: return null
+        val offEntry = partnerIndex()?.let { entries[it] } ?: return null
+        val off = offEntry.lucidTiff?.let { runCatching { CaptureLibrary.readFloatTiff(this, it) }.getOrNull() } ?: return null
+        if (off.samples.size != on.samples.size) return null
+        fun signal(m: JSONObject?): Double {
+            val l = m?.optJSONObject("lucid") ?: return Double.NaN
+            return l.optDouble("exposure_us") * 10.0.pow(l.optDouble("gain_db", 0.0) / 20.0)
+        }
+        val sOn = signal(data.metadata)
+        val sOff = signal(CaptureLibrary.metadata(this, offEntry))
+        val k = if (sOn.isFinite() && sOff.isFinite() && sOff > 0) (sOn / sOff).toFloat() else 1f
+        val diff = FloatArray(on.samples.size) { on.samples[it] - off.samples[it] * k }
+        data.activeCache[Source.LUCID] = diff
+        return diff
+    }
+
     /** How much of the lit half's light its lights supplied, from the active map. */
     private fun activeShare(data: Loaded, src: Source): Float? {
         val diff = synchronized(data.activeCache) { data.activeCache[src] } ?: return null
-        val lit = data.hdr[src]?.samples ?: return null
+        val lit = (if (src == Source.LUCID) data.lucid else data.hdr[src])?.samples ?: return null
         var added = 0.0
         var total = 0.0
         for (i in diff.indices step 7) {
@@ -668,15 +696,40 @@ class ViewerActivity : AppCompatActivity() {
      * The Lucid's raw 24-bit frame made fit to look at (see TritonDisplay.renderRaw): as
      * the camera sent it, not turned, one pixel per 2x2 cell.
      */
-    private fun drawLucid(data: Loaded, step: Int): Bitmap? {
-        val raw = data.lucid ?: entries.firstOrNull { it.stamp == data.stamp }?.lucidTiff
+    private fun lucidRaw(data: Loaded): TiffReader.FloatRaw? =
+        data.lucid ?: entries.firstOrNull { it.stamp == data.stamp }?.lucidTiff
             ?.let { runCatching { CaptureLibrary.readFloatTiff(this, it) }.getOrNull() }
-            ?.also { data.lucid = it } ?: return null
+            ?.also { data.lucid = it }
+
+    /**
+     * The Lucid frame; for a flash on/off pair, ON, OFF and ACTIVE all at the ON frame's
+     * balance and white point. Each choosing its own would brighten OFF back up to look like
+     * ON, which is the one thing the pair is there to show.
+     */
+    private fun drawLucid(data: Loaded, step: Int): Bitmap? {
+        val raw = lucidRaw(data) ?: return null
         val w = raw.width / (2 * step)
         val h = raw.height / (2 * step)
         val pixels = IntArray(w * h)
-        TritonDisplay.renderRaw(raw.samples, raw.width, raw.height, pixels, step)
+        val counts = if (active && data.isLucidPair) activeMap(data, Source.LUCID) ?: return null else raw.samples
+        val look = if (data.isLucidPair) pairLook(data, step) else null
+        TritonDisplay.renderRaw(counts, raw.width, raw.height, pixels, step, look)
         return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+    }
+
+    /** Looks by the stamp of the pair's ON frame, chosen from that frame. */
+    private val pairLooks = HashMap<String, TritonDisplay.Look>()
+
+    private fun pairLook(data: Loaded, step: Int): TritonDisplay.Look? {
+        val compare = data.metadata?.optJSONObject("compare") ?: return null
+        val onStamp = if (compare.optString("role") == "ambient") compare.optString("partner") else data.stamp
+        synchronized(pairLooks) { pairLooks[onStamp]?.let { return it } }
+        val on = if (onStamp == data.stamp) lucidRaw(data) else entries.firstOrNull { it.stamp == onStamp }?.lucidTiff
+            ?.let { runCatching { CaptureLibrary.readFloatTiff(this, it) }.getOrNull() }
+        on ?: return null
+        val look = TritonDisplay.renderRaw(on.samples, on.width, on.height, IntArray((on.width / (2 * step)) * (on.height / (2 * step))), step)
+        synchronized(pairLooks) { pairLooks[onStamp] = look }
+        return look
     }
 
     /** A burst has no single NIR frame; its anchor bracket is the one at the dial's exposure. */
@@ -849,11 +902,12 @@ class ViewerActivity : AppCompatActivity() {
         val role = loaded?.takeIf { it.stamp == entries.getOrNull(index)?.stamp }
             ?.metadata?.optJSONObject("compare")?.optString("role")
         binding.togglePartner.visibility = if (role != null && partnerIndex() != null) View.VISIBLE else View.GONE
+        val lucidPair = loaded?.isLucidPair == true
         binding.togglePartner.setText(
             when {
                 active -> R.string.compare_active
-                role == "ambient" -> R.string.compare_ambient
-                else -> R.string.compare_lit
+                role == "ambient" -> if (lucidPair) R.string.compare_flash_off else R.string.compare_ambient
+                else -> if (lucidPair) R.string.compare_flash_on else R.string.compare_lit
             }
         )
         binding.togglePartner.setTextColor(

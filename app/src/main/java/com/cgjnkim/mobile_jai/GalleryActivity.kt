@@ -315,8 +315,15 @@ class GalleryActivity : AppCompatActivity() {
             val entry = entries[position]
             holder.stamp = entry.stamp
             holder.cell.time.text = CaptureLibrary.label(entry.stamp).substring(5, 16)
-            holder.cell.badgeHdr.visibility = if (entry.isHdr) View.VISIBLE else View.GONE
-            holder.cell.badgeHdr.setText(if (entry.compareRole != null) R.string.gallery_compare_badge else R.string.viewer_hdr)
+            // HDR, HDR comparison, or a single frame's flash on/off pair (the Lucid's).
+            holder.cell.badgeHdr.visibility = if (entry.isHdr || entry.compareRole != null) View.VISIBLE else View.GONE
+            holder.cell.badgeHdr.setText(
+                when {
+                    !entry.isHdr -> R.string.gallery_flash_pair_badge
+                    entry.compareRole != null -> R.string.gallery_compare_badge
+                    else -> R.string.viewer_hdr
+                }
+            )
             val scene = sceneOfStamp[entry.stamp]
             holder.cell.sceneLabel.visibility = if (scene != null) View.VISIBLE else View.GONE
             holder.cell.sceneLabel.text = scene?.name

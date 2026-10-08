@@ -45,6 +45,7 @@ dependencies {
     implementation(project(":camera-jai"))
     implementation(project(":camera-helios"))
     implementation(project(":light-dcs"))
+    implementation(project(":light-tapo"))
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.recyclerview)

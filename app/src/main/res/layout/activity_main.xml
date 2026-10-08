@@ -389,6 +389,23 @@
             android:textSize="13sp"
             android:textStyle="bold" />
 
+        <!-- Which lights the flash switches: white (Tapo lamp or phone LED), NIR, or both. -->
+        <TextView
+            android:id="@+id/toggle_flash_target"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/mode_pill"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="7dp"
+            android:text="@string/flash_target_nir"
+            android:textAllCaps="true"
+            android:textColor="@color/camera_quiet"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
         <!-- The preview's display white balance: the global gains, or the sensor's own 1:1:1. -->
         <TextView
             android:id="@+id/toggle_wb"

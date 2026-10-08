@@ -59,8 +59,18 @@
     <string name="compare_progress_fmt">%1$s %2$d/%3$d</string>
     <string name="compare_lit">LIT</string>
     <string name="compare_ambient">AMBIENT</string>
+    <string name="compare_flash_on">FLASH ON</string>
+    <string name="compare_flash_off">FLASH OFF</string>
+    <string name="gallery_flash_pair_badge">FLASH ON/OFF</string>
     <string name="status_saved_compare">compare saved: %1$d files</string>
     <string name="compare_no_torch">no phone torch on this device</string>
+    <string name="white_tapo_found_fmt">Tapo %1$s on Wi-Fi: CMP PHONE switches its lamp</string>
+    <string name="white_tapo_lost">Tapo plug gone: CMP PHONE uses the phone LED</string>
+    <string name="flash_target_nir">NIR</string>
+    <string name="flash_target_white">RGB</string>
+    <string name="flash_target_both">BOTH</string>
+    <string name="flash_target_fmt">Flash lights: %1$s</string>
+    <string name="white_tapo_vpn">A VPN blocks the Tapo Wi-Fi: exclude Mobile JAI from it (Tailscale → Split tunneling)</string>
     <string name="compare_active">ACTIVE</string>
     <string name="compare_active_share_fmt">ACTIVE = LIT − AMBIENT · lights supply %1$.0f%% of the lit light</string>
     <string name="gallery_compare_badge">HDR · CMP</string>

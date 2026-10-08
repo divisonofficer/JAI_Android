@@ -54,6 +54,12 @@ object CaptureStore {
         val controller: String?,
         val lighthead: String?,
         val channel: Int?,
+        /** nir, white or both: which lights the flash was set to switch. */
+        val target: String? = null,
+        /** Whether the white light -- a Tapo plug's lamp or the phone's LED -- was on. */
+        val whiteLit: Boolean = false,
+        /** Which white light that was. */
+        val white: String? = null,
     )
 
     /**
@@ -70,6 +76,8 @@ object CaptureStore {
         depthDevice: GigeDeviceInfo? = null,
         lucid: TritonCamera.Capture? = null,
         lucidDevice: GigeDeviceInfo? = null,
+        /** For one half of a flash on/off pair: the same "compare" object as an HDR burst's. */
+        compare: JSONObject? = null,
     ): List<String> {
         require(capture != null || lucid != null) { "nothing to save" }
         val written = mutableListOf<String>()
@@ -108,7 +116,7 @@ object CaptureStore {
 
         val jsonName = "${stamp}.json"
         write(context, files, DATA_PATH, jsonName, "application/json") { out ->
-            out.write(metadata(capture, device, stamp, flash, depth, depthDevice, lucid, lucidDevice).toString(2).toByteArray())
+            out.write(metadata(capture, device, stamp, flash, depth, depthDevice, lucid, lucidDevice, compare).toString(2).toByteArray())
         }
         written += jsonName
 
@@ -134,8 +142,10 @@ object CaptureStore {
         depthDevice: GigeDeviceInfo?,
         lucid: TritonCamera.Capture?,
         lucidDevice: GigeDeviceInfo?,
+        compare: JSONObject?,
     ) = JSONObject().apply {
         put("stamp", stamp)
+        compare?.let { put("compare", it) }
         flash?.let { put("flash", flashJson(it)) }
         depth?.let { put("depth", depthJson(it, depthDevice)) }
         lucid?.let { put("lucid", lucidJson(it, lucidDevice)) }
@@ -212,6 +222,9 @@ object CaptureStore {
         put("controller", f.controller)
         put("light_head", f.lighthead)
         put("channel", f.channel)
+        put("target", f.target)
+        put("white_lit", f.whiteLit)
+        put("white_light", f.white)
     }
 
     /**

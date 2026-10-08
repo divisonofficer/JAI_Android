@@ -87,17 +87,19 @@ object CaptureLibrary {
     }
 
     /**
-     * Reads a burst's comparison role from its metadata. Only bursts can be halves of a
-     * comparison, so only their (small) JSON files are opened.
+     * Reads a capture's comparison role from its metadata. Only HDR bursts and Lucid frames
+     * can be halves of one -- a JAI burst's flash comparison, or a Lucid flash on/off pair --
+     * so only their (small) JSON files are opened.
      */
     private fun withCompare(context: Context, entry: CaptureEntry): CaptureEntry {
-        if (!entry.isHdr) return entry
+        if (!entry.isHdr && entry.lucidTiff == null) return entry
         val compare = metadata(context, entry)?.optJSONObject("compare") ?: return entry
         return CaptureEntry(
             entry.stamp, entry.rgbTiff, entry.nirTiff, entry.preview, entry.metadata,
             entry.depthTiffs, entry.hdrTiffs, entry.bracketTiffs,
             compareRole = compare.optString("role").takeIf { it.isNotEmpty() },
             partnerStamp = compare.optString("partner").takeIf { it.isNotEmpty() },
+            lucidTiff = entry.lucidTiff,
         )
     }
 

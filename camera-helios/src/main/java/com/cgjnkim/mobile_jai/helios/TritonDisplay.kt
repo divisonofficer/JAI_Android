@@ -45,12 +45,23 @@ object TritonDisplay {
     fun renderRaw(frame: RawFrame, out: IntArray, step: Int = 1) =
         render(frame.width, frame.height, out, step, clip = RAW_CLIP) { i -> count(frame.data, i).toFloat() }
 
-    /** [renderRaw] from counts already decoded -- a saved `_lucid.tiff`, say. */
-    fun renderRaw(counts: FloatArray, w: Int, h: Int, out: IntArray, step: Int = 1) =
-        render(w, h, out, step, clip = RAW_CLIP) { i -> counts[i] }
+    /**
+     * The balance and white point a render chose. Passed back in, it shows another frame
+     * the same way: the flash-off half of a pair, or the flash's own contribution, at the
+     * flash-on half's look -- each choosing its own would make them look alike.
+     */
+    data class Look(val gainR: Float, val gainB: Float, val white: Float)
+
+    /**
+     * [renderRaw] from counts already decoded -- a saved `_lucid.tiff`, say. With [look],
+     * at that look rather than one chosen from these counts. Negative counts (a difference
+     * of two frames) show as black. Returns the look used.
+     */
+    fun renderRaw(counts: FloatArray, w: Int, h: Int, out: IntArray, step: Int = 1, look: Look? = null): Look =
+        render(w, h, out, step, clip = RAW_CLIP, look = look) { i -> counts[i] }
 
     /** @param clip a sample at or above which a cell is left out of the balance */
-    private inline fun render(w: Int, h: Int, out: IntArray, step: Int, clip: Float, at: (Int) -> Float) {
+    private inline fun render(w: Int, h: Int, out: IntArray, step: Int, clip: Float, look: Look? = null, at: (Int) -> Float): Look {
         val ow = w / (2 * step)
         val oh = h / (2 * step)
         val cells = ow * oh
@@ -71,16 +82,18 @@ object TritonDisplay {
             // the rest of the scene: a ceiling lamp at 255 everywhere kept the balance at 1.
             if (maxOf(rs[k], gs[k], bs[k]) < clip) { sr += rs[k]; sg += gs[k]; sb += bs[k] }
         }
-        val gr = if (sr > 0) (sg / sr).toFloat() else 1f
-        val gb = if (sb > 0) (sg / sb).toFloat() else 1f
+        val gr = look?.gainR ?: if (sr > 0) (sg / sr).toFloat() else 1f
+        val gb = look?.gainB ?: if (sb > 0) (sg / sb).toFloat() else 1f
         // The white point from every PEAK_STRIDE-th cell: as good as all of them, and the
         // sort is what a preview frame's time would otherwise go to.
-        val peak = FloatArray((cells + PEAK_STRIDE - 1) / PEAK_STRIDE) {
-            val k = it * PEAK_STRIDE
-            maxOf(rs[k] * gr, gs[k], bs[k] * gb)
+        val top = look?.white ?: run {
+            val peak = FloatArray((cells + PEAK_STRIDE - 1) / PEAK_STRIDE) {
+                val k = it * PEAK_STRIDE
+                maxOf(rs[k] * gr, gs[k], bs[k] * gb)
+            }
+            peak.sort()
+            peak[(peak.size * 0.995).toInt().coerceAtMost(peak.size - 1)].coerceAtLeast(1e-6f)
         }
-        peak.sort()
-        val top = peak[(peak.size * 0.995).toInt().coerceAtMost(peak.size - 1)].coerceAtLeast(1e-6f)
         val lut = curve
         val scale = (LUT_SIZE - 1) / top
         for (k in 0 until cells) {
@@ -89,6 +102,7 @@ object TritonDisplay {
             val b = lut[(bs[k] * gb * scale).toInt().coerceIn(0, LUT_SIZE - 1)]
             out[k] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
         }
+        return Look(gr, gb, top)
     }
 
     private const val PEAK_STRIDE = 7
