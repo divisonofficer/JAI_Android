@@ -1,6 +1,4 @@
 <resources>
     <!-- Here rather than in the app: the light's own advice, in one place with its client. -->
-    <string name="light_pinned_fmt">Light fixed at %1$s: it now survives tether restarts</string>
-    <string name="light_not_found">Light not found. With tethering ON, power-cycle the controller</string>
-    <string name="light_subnet_fmt">Light is fixed at %1$s but the tether is %2$s. Hold the controller\'s reset 5 s, then power-cycle it</string>
+    <string name="light_not_found">Light not found. With tethering ON, power-cycle the light controller</string>
 </resources>

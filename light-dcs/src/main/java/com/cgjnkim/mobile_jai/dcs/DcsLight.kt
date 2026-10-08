@@ -34,6 +34,12 @@ import java.nio.ByteBuffer
  * The current is written while the channel is off: the controller keeps it, so switching
  * the flash on is then a single MODE command.
  *
+ * Leave the controller on DHCP. It asks only once, the instant its link comes up, and
+ * falls back to 192.168.0.1 for good if the tether's DHCP server is not up yet -- then it
+ * takes a power cycle with tethering on. A static IP (SET:STATIC:IP) avoids that but is
+ * worse: the phone picks a new random tether subnet at every reboot, the static address
+ * is then off-subnet, and only the reset button gets it back (tried 2026-10-01).
+ *
  * Blocking calls (open and every setter) belong off the main thread.
  */
 class DcsLight : AutoCloseable {
@@ -183,22 +189,6 @@ class DcsLight : AutoCloseable {
         // Even when we think it is off: this is the command that must not be skipped.
         command("SET:MODE:CHANNEL${i.channel},$MODE_OFF")
         isOn = false
-    }
-
-    /**
-     * Writes [address] to the controller's EEPROM as its static IP, in place of DHCP, from
-     * its next power-up on. Returns the controller's answer.
-     *
-     * Why: the controller asks for DHCP exactly once, the instant its link comes up, and
-     * falls back to 192.168.0.1 for good if nothing answers. The phone's tether restarts
-     * now and then, and its DHCP server starts a moment after the link, so after any
-     * restart the controller is lost until it is power-cycled. With a static address it is
-     * simply back when the tether is. The catch: if the tether's subnet ever changes, the
-     * controller is unreachable until its reset button is held for 5 s (back to DHCP).
-     */
-    fun setStaticIp(address: Inet4Address): String = synchronized(lock) {
-        requireInfo()
-        command("SET:STATIC:IP,${address.hostAddress}")
     }
 
     /** The controller's own account of every channel, for diagnostics. */
