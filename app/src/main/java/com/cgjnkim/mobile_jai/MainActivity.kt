@@ -1,6 +1,7 @@
 package com.cgjnkim.mobile_jai
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
@@ -191,6 +192,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        requestLocalNetwork()
 
         for (s in Source.values()) {
             shutterUs[s.index] = prefs.getLong("shutter_${s.label}", shutterUs[s.index])
@@ -217,6 +219,7 @@ class MainActivity : AppCompatActivity() {
         binding.levelReading.setOnClickListener { dial = Dial.LEVEL; showDial() }
         binding.toggleFlash.setOnClickListener { cycleFlash() }
         binding.toggleFlashTarget.setOnClickListener { cycleFlashTarget() }
+        binding.lampStep.setOnClickListener { stepLamp() }
         binding.chipLight.setOnClickListener { reconnectLight() }
         binding.toggleClip.setOnClickListener { clip = !clip; showModes(); lastRendered = null }
         previewWb = prefs.getBoolean("preview_wb", true)
@@ -284,6 +287,25 @@ class MainActivity : AppCompatActivity() {
         lucidWorker.shutdown()
         saver.shutdown()
         super.onDestroy()
+    }
+
+    /**
+     * Android 17 makes the local network a runtime permission: without it nothing on the
+     * Ethernet link -- cameras, lights, relay -- can be reached at all. The connect loops
+     * just keep retrying, so once it is granted they find everything on their next pass.
+     */
+    private fun requestLocalNetwork() {
+        if (Build.VERSION.SDK_INT < LOCAL_NETWORK_API) return
+        if (ContextCompat.checkSelfPermission(this, LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED) return
+        requestPermissions(arrayOf(LOCAL_NETWORK), REQUEST_LOCAL_NETWORK)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_LOCAL_NETWORK && grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) {
+            showMessage(getString(R.string.local_network_denied))
+        }
     }
 
     // ---- connection ---------------------------------------------------------------
@@ -713,19 +735,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Looks for a Tapo plug on Wi-Fi now and then, so that one joined after the app started
-     * is picked up, and one that went away hands back to the phone's LED.
+     * Looks for the relay lamp on Ethernet and a Tapo plug on Wi-Fi now and then, so that
+     * one that turns up after the app started is picked up, and one that went away hands
+     * back to the next (in the end the phone's LED).
      */
     private fun findWhiteLight() {
         whiteSearching = true
         nextWhiteAt = SystemClock.uptimeMillis() + WHITE_SEARCH_MS
         lightWorker.execute {
-            val before = white.plug
-            val found = runCatching { white.find() }.onFailure { Log.w(TAG, "tapo search", it) }.getOrNull()
+            val before = white.description
+            val found = runCatching { white.find() }.onFailure { Log.w(TAG, "white light search", it) }.getOrNull()
+            val notice = white.relayNotice?.also { white.relayNotice = null }
             main.post {
                 whiteSearching = false
-                if (found != null && found !== before) showMessage(getString(R.string.white_tapo_found_fmt, found.model))
-                else if (found == null && before != null) showMessage(getString(R.string.white_tapo_lost))
+                showLight()
+                notice?.let { showMessage(it) }
+                if (found != null && found != before) showMessage(getString(R.string.white_found_fmt, found))
+                else if (found == null && before != white.description) showMessage(getString(R.string.white_lost))
                 else if (found == null && TapoPlug.blockedByVpn && !vpnHintShown) {
                     vpnHintShown = true
                     showMessage(getString(R.string.white_tapo_vpn))
@@ -937,6 +963,14 @@ class MainActivity : AppCompatActivity() {
         }.joinToString(" + ")))
     }
 
+    /** One extra step of the relay lamp's mode, for when it lights in the wrong one. */
+    private fun stepLamp() {
+        lightWorker.execute {
+            val ok = white.stepLampMode()
+            main.post { showMessage(getString(if (ok) R.string.lamp_stepped else R.string.lamp_step_failed)) }
+        }
+    }
+
     private fun applyFlash() {
         lightWorker.execute {
             runCatching { syncFlash() }.onFailure { e ->
@@ -1006,6 +1040,7 @@ class MainActivity : AppCompatActivity() {
         binding.dotLight.background.mutate().setTint(ContextCompat.getColor(this, color))
         binding.toggleFlash.text = getString(flash.label)
         binding.toggleFlashTarget.setText(flashTarget.label)
+        binding.lampStep.visibility = if (white.relay != null) View.VISIBLE else View.GONE
         binding.toggleFlashTarget.setTextColor(
             ContextCompat.getColor(this, if (flash == Flash.OFF) R.color.camera_quiet else R.color.camera_accent)
         )
@@ -1123,17 +1158,18 @@ class MainActivity : AppCompatActivity() {
      */
     private fun lucidOffFrame(lit: Pair<Boolean, Boolean>): Result<TritonCamera.Capture> {
         if (lit.first) runCatching { light.setOff() }.onFailure { Log.w(TAG, "flash off", it) }
-        val wasPlug = lit.second && white.plug != null
+        // Taken before the switch: a light that fails to switch is dropped, and with it its settle time.
+        val settle = lucidSettleMs(lit.second)
         if (lit.second) white.set(false)
-        Thread.sleep(lucidSettleMs(lit.second, wasPlug))
+        Thread.sleep(settle)
         val off = lucid.capture(afterHostNs = System.nanoTime())
         if (flash == Flash.ALWAYS) runCatching { syncFlash() }.onFailure { Log.w(TAG, "flash restore", it) }
         return off
     }
 
-    /** A lamp on a plug fades far slower than an LED goes out. */
-    private fun lucidSettleMs(white: Boolean, plug: Boolean) =
-        if (white && plug) maxOf(LIGHT_SETTLE_MS, WhiteLight.PLUG_SETTLE_MS) else LIGHT_SETTLE_MS
+    /** A mains lamp fades far slower than an LED goes out; the white light knows its own. */
+    private fun lucidSettleMs(whiteLit: Boolean) =
+        if (whiteLit) maxOf(LIGHT_SETTLE_MS, white.settleMs) else LIGHT_SETTLE_MS
 
     /**
      * The link between the two halves, in the JAI comparison's format: CaptureLibrary,
@@ -1145,7 +1181,7 @@ class MainActivity : AppCompatActivity() {
         put("kind", "lucid_flash")
         put("nir_light", lit.first)
         put("white_light", if (lit.second) white.description else null)
-        put("settle_ms", lucidSettleMs(lit.second, lit.second && white.plug != null))
+        put("settle_ms", lucidSettleMs(lit.second))
         put("same_shutters", true)
     }
 
@@ -1234,16 +1270,16 @@ class MainActivity : AppCompatActivity() {
         )
 
         worker.execute {
-            val litStamp = CaptureStore.newStamp()
-            val nirOn = lights.nir && light.isOpen &&
-                runCatching { light.setOn(); true }.onFailure { Log.w(TAG, "nir light on", it) }.getOrDefault(false)
-            // The white light belongs to the comparison here, whatever the flash left it at.
-            if (!lights.phone && white.isOn) white.set(false)
-            val phoneOn = lights.phone && white.set(true)
-            // A lamp on a smart plug takes far longer than an LED to come up and go out: the
-            // relay, then the lamp's own warm-up and decay.
+            // Ambient first, then lit: the relay lamp then needs one switch-on just before
+            // its burst and does its mode rewind (see WhiteLight) only after, when the
+            // shooting is over. Every light is off for the ambient half, ALWAYS's too.
+            // A lamp takes far longer than an LED to come up and go out: the relay or plug,
+            // then the lamp's own warm-up and decay.
             val settleMs = if (lights.phone) maxOf(LIGHT_SETTLE_MS, white.settleMs) else LIGHT_SETTLE_MS
-            if (phoneOn || nirOn) Thread.sleep(settleMs)
+            val wasLit = white.isOn || light.isOn
+            if (white.isOn) white.set(false)
+            if (light.isOpen) runCatching { light.setOff() }.onFailure { Log.w(TAG, "nir light off", it) }
+            if (wasLit) Thread.sleep(settleMs)
 
             fun burst(label: Int, triggered: () -> Unit): Pair<Result<List<JaiCamera.Capture>>, Result<HeliosCamera.Capture>?> {
                 darkenDepth()
@@ -1260,18 +1296,25 @@ class MainActivity : AppCompatActivity() {
                 return result to depth
             }
 
-            val (lit, litDepth) = try {
-                burst(R.string.compare_lit, ::onTriggered)
+            val ambientStamp = CaptureStore.newStamp()
+            val (ambient, ambientDepth) = burst(R.string.compare_ambient, ::onTriggered)
+            // Seconds after the first: the stamps, which carry milliseconds, cannot collide.
+            val litStamp = CaptureStore.newStamp()
+            var nirOn = false
+            var phoneOn = false
+            val (lit, litDepth) = if (ambient.isFailure) {
+                Pair(Result.failure<List<JaiCamera.Capture>>(ambient.exceptionOrNull()!!), null)
+            } else try {
+                nirOn = lights.nir && light.isOpen &&
+                    runCatching { light.setOn(); true }.onFailure { Log.w(TAG, "nir light on", it) }.getOrDefault(false)
+                phoneOn = lights.phone && white.set(true)
+                if (phoneOn || nirOn) Thread.sleep(settleMs)
+                burst(R.string.compare_lit) {}
             } finally {
+                // Off (the relay lamp's rewind with it) before anything else happens.
                 if (phoneOn || white.isOn) white.set(false)
-                // Off even in ALWAYS mode: the second half is the one without light.
                 if (light.isOpen) runCatching { light.setOff() }.onFailure { Log.w(TAG, "nir light off", it) }
             }
-            Thread.sleep(settleMs)
-            // Seconds after the first: the stamps, which carry milliseconds, cannot collide.
-            val ambientStamp = CaptureStore.newStamp()
-            val (ambient, ambientDepth) =
-                if (lit.isSuccess) burst(R.string.compare_ambient) {} else Pair(Result.failure<List<JaiCamera.Capture>>(lit.exceptionOrNull()!!), null)
             if (flash == Flash.ALWAYS) runCatching { syncFlash() }.onFailure { Log.w(TAG, "flash restore", it) }
             resumeLucidPreview()
             resumeDepthPreview()
@@ -1387,6 +1430,9 @@ class MainActivity : AppCompatActivity() {
         const val DEFAULT_RGB_US = 10_000L
         const val DEFAULT_NIR_US = 100_000L
         const val LIGHT_RETRY_MS = 10_000L
+        const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
+        const val LOCAL_NETWORK_API = 37
+        const val REQUEST_LOCAL_NETWORK = 7
         const val LIGHT_CHECK_MS = 5_000L
         const val HELIOS_RETRY_MS = 5_000L
         const val LUCID_RETRY_MS = 5_000L

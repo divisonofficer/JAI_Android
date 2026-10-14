@@ -64,8 +64,12 @@
     <string name="gallery_flash_pair_badge">FLASH ON/OFF</string>
     <string name="status_saved_compare">compare saved: %1$d files</string>
     <string name="compare_no_torch">no phone torch on this device</string>
-    <string name="white_tapo_found_fmt">Tapo %1$s on Wi-Fi: CMP PHONE switches its lamp</string>
-    <string name="white_tapo_lost">Tapo plug gone: CMP PHONE uses the phone LED</string>
+    <string name="white_found_fmt">RGB flash: %1$s</string>
+    <string name="white_lost">RGB flash light gone: falling back</string>
+    <string name="lamp_step">LAMP +1</string>
+    <string name="local_network_denied">Without local network access the cameras and lights cannot be reached (Settings → Apps → Mobile JAI → Permissions)</string>
+    <string name="lamp_stepped">Lamp mode stepped by one</string>
+    <string name="lamp_step_failed">Lamp step failed: relay not answering</string>
     <string name="flash_target_nir">NIR</string>
     <string name="flash_target_white">RGB</string>
     <string name="flash_target_both">BOTH</string>

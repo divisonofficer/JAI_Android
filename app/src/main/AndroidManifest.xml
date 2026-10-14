@@ -3,6 +3,12 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+        Android 17 (API 37) gates the local network behind this runtime permission: without
+        it every packet to the cameras, the lights and the relay on the tethered Ethernet
+        fails with EPERM (seen on a Pixel 9 Pro XL, 2026-10-14).
+    -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <application
         android:allowBackup="true"
