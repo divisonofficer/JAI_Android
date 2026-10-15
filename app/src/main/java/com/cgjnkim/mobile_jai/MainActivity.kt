@@ -110,6 +110,9 @@ class MainActivity : AppCompatActivity() {
     /** Whether the preview is drawn with the global display balance or the sensor's 1:1:1. */
     private var previewWb = true
 
+    /** The Lucid's HDR image enhancement (its LED flicker mitigation): see TritonCamera.setHdrEnhancement. */
+    private var lucidEnhance = false
+
     /** The shutter takes a bracket for HDR instead of one pair; see [captureHdr]. */
     /** The shutter's HDR mode: off, the full four-frame bracket, or the fast pair. */
     private enum class Hdr(val plan: BurstPlan?) { OFF(null), FULL(BurstPlan.FULL), FAST(BurstPlan.FAST) }
@@ -119,11 +122,17 @@ class MainActivity : AppCompatActivity() {
     private val burstPlan get() = hdrMode.plan ?: BurstPlan.FULL
 
     /** With HDR: which lights a flash comparison lights its first bracket with; OFF for none. */
-    private enum class Compare(val label: Int, val nir: Boolean, val phone: Boolean) {
-        OFF(R.string.compare_off, false, false),
-        NIR(R.string.compare_nir, true, false),
-        PHONE(R.string.compare_phone, false, true),
-        BOTH(R.string.compare_both, true, true),
+    /**
+     * Which lights the lit half of a comparison has: the DCS NIR light, lamp A (the white
+     * light: the relay's mode-cycling lamp, else the Tapo or the phone LED) and lamp B (the
+     * relay's plain on/off lamp).
+     */
+    private enum class Compare(val label: Int, val nir: Boolean, val a: Boolean, val b: Boolean) {
+        OFF(R.string.compare_off, false, false, false),
+        NIR(R.string.compare_nir, true, false, false),
+        A(R.string.compare_a, false, true, false),
+        B(R.string.compare_b, false, false, true),
+        AB(R.string.compare_ab, false, true, true),
     }
 
     private var compare = Compare.OFF
@@ -229,6 +238,17 @@ class MainActivity : AppCompatActivity() {
             showModes()
             lastRendered = null
         }
+        lucidEnhance = prefs.getBoolean("lucid_hdr_enhancement", false)
+        binding.toggleLfm.setOnClickListener {
+            lucidEnhance = !lucidEnhance
+            prefs.edit().putBoolean("lucid_hdr_enhancement", lucidEnhance).apply()
+            showModes()
+            val on = lucidEnhance
+            if (lucid.isOpen) lucidWorker.execute {
+                val read = runCatching { lucid.setHdrEnhancement(on) }.onFailure { Log.w(TAG, "lucid enhancement", it) }.getOrNull()
+                main.post { showMessage(getString(R.string.lfm_fmt, getString(if (read == true) R.string.lfm_on else if (read == false) R.string.lfm_off else R.string.lfm_unknown))) }
+            }
+        }
         hdrMode = Hdr.values().getOrElse(prefs.getInt("hdr_mode", if (prefs.getBoolean("hdr", false)) 1 else 0)) { Hdr.OFF }
         binding.toggleHdr.setOnClickListener { toggleHdr() }
         compare = Compare.values().getOrElse(prefs.getInt("compare", 0)) { Compare.OFF }
@@ -265,7 +285,10 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
         // A light left burning by an interrupted comparison would stay on for anyone. On the
         // light worker: switching a plug is a network call.
-        lightWorker.execute { if (white.isOn) white.set(false) }
+        lightWorker.execute {
+            if (white.isOn) white.set(false)
+            if (white.lampBOn) white.setLampB(false)
+        }
         main.removeCallbacks(previewTick)
         worker.execute { camera.close() }
         // Off, and the controller free for anyone else: a backgrounded app should not leave a light burning.
@@ -421,6 +444,7 @@ class MainActivity : AppCompatActivity() {
                 gain = lucid.gainRange()
                 lucid.setExposure(lucidShutterUs.toDouble())
                 lucid.setGain(lucidGainMilliDb / 1000.0)
+                if (lucidEnhance) lucid.setHdrEnhancement(true)
             }.onFailure { Log.w(TAG, "restoring Lucid settings", it) }
             main.post {
                 lucidConnecting = false
@@ -435,6 +459,7 @@ class MainActivity : AppCompatActivity() {
                 showLucidStatus()
                 autoLucid()
                 showDial()
+                showModes()
                 updateShutter()
             }
         }
@@ -719,6 +744,8 @@ class MainActivity : AppCompatActivity() {
         )
         binding.toggleClip.setTextColor(if (clip) accent else quiet)
         binding.toggleWb.setTextColor(if (previewWb) accent else quiet)
+        binding.toggleLfm.visibility = if (lucid.isOpen) View.VISIBLE else View.GONE
+        binding.toggleLfm.setTextColor(if (lucidEnhance) accent else quiet)
         binding.toggleHdr.setTextColor(if (hdr) accent else quiet)
         binding.toggleHdr.setText(if (hdrMode == Hdr.FAST) R.string.hdr_fast_label else R.string.hdr_label)
         binding.toggleCompare.visibility = if (hdr) View.VISIBLE else View.GONE
@@ -730,8 +757,11 @@ class MainActivity : AppCompatActivity() {
         compare = Compare.values()[(compare.ordinal + 1) % Compare.values().size]
         prefs.edit().putInt("compare", compare.ordinal).apply()
         showModes()
-        if (compare.phone && !white.available) showMessage(getString(R.string.compare_no_torch))
-        else if (compare.phone) showMessage(white.description)
+        if (compare.b && !white.hasLampB) showMessage(getString(R.string.compare_no_lamp_b))
+        else if (compare.a && !white.available) showMessage(getString(R.string.compare_no_torch))
+        else if (compare.a || compare.b) showMessage(listOfNotNull(
+            white.description.takeIf { compare.a }, white.lampBDescription.takeIf { compare.b },
+        ).joinToString(" + "))
     }
 
     /**
@@ -1076,8 +1106,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun capture() {
         if (capturing || pendingSaves >= MAX_PENDING_SAVES || (!camera.isOpen && !lucid.isOpen)) return
-        // Brackets are the JAI's; with only the Lucid there, the shutter takes its one frame.
+        // Brackets are the JAI's; with only the Lucid there, the shutter takes its one frame --
+        // or, with lights to compare (CMP under HDR, else the flash), an unlit/lit pair of them.
         if (hdr && camera.isOpen) return if (compare != Compare.OFF) captureCompare() else captureHdr()
+        if (!camera.isOpen && lucid.isOpen) {
+            if (hdr && compare != Compare.OFF) return captureLucidPair(compare.nir, compare.a, compare.b, "cmp ${compare.name}")
+            if (flash != Flash.OFF) return captureLucidPair(flashTarget.nir, flashTarget.white, false, "flash ${flashTarget.name}")
+        }
         capturing = true
         pendingSaves++
         binding.shutterProgress.visibility = View.VISIBLE
@@ -1146,6 +1181,104 @@ class MainActivity : AppCompatActivity() {
                     }
                     main.post { pendingSaves--; updateShutter(); showMessage(message) }
                 }
+            }
+        }
+    }
+
+    /**
+     * The Lucid alone, lit and unlit: every light off and the ambient frame first, then the
+     * chosen lights on, the settle time and the lit frame, then the lights off -- lamp A's
+     * mode rewind only after both frames are in. The camera stays in its capture format
+     * between the two, so the second costs a frame and the transfer, not the format switch.
+     * Saved as a Lucid flash pair (FLASH ON / OFF / ACTIVE in the viewer). On [worker].
+     */
+    private fun captureLucidPair(nir: Boolean, a: Boolean, b: Boolean, label: String) {
+        capturing = true
+        pendingSaves++
+        binding.shutterProgress.visibility = View.VISIBLE
+        updateShutter()
+        worker.execute {
+            val settleMs = maxOf(
+                LIGHT_SETTLE_MS,
+                if (a) white.settleMs else 0L,
+                if (b) WhiteLight.RELAY_SETTLE_MS else 0L,
+            )
+            val wasLit = white.isOn || white.lampBOn || light.isOn
+            if (white.isOn) white.set(false)
+            if (white.lampBOn) white.setLampB(false)
+            if (light.isOpen) runCatching { light.setOff() }.onFailure { Log.w(TAG, "nir light off", it) }
+            if (wasLit) Thread.sleep(settleMs)
+            darkenDepth()
+
+            val offStamp = CaptureStore.newStamp()
+            onTriggered()
+            val off = lucid.capture(afterHostNs = System.nanoTime()).onFailure { Log.w(TAG, "lucid ambient", it) }
+            val litStamp = CaptureStore.newStamp()
+            var nirOn = false
+            var aOn = false
+            var bOn = false
+            val lit = if (off.isFailure) off else try {
+                nirOn = nir && light.isOpen &&
+                    runCatching { light.setOn(); true }.onFailure { Log.w(TAG, "nir light on", it) }.getOrDefault(false)
+                aOn = a && white.set(true)
+                bOn = b && white.setLampB(true)
+                if (nirOn || aOn || bOn) Thread.sleep(settleMs)
+                lucid.capture(afterHostNs = System.nanoTime()).onFailure { Log.w(TAG, "lucid lit", it) }
+            } finally {
+                if (aOn || white.isOn) white.set(false)
+                if (bOn || white.lampBOn) white.setLampB(false)
+                if (light.isOpen) runCatching { light.setOff() }.onFailure { Log.w(TAG, "nir light off", it) }
+            }
+            if (flash == Flash.ALWAYS) runCatching { syncFlash() }.onFailure { Log.w(TAG, "flash restore", it) }
+            resumeLucidPreview()
+            val depth = lit.getOrNull()?.let { grabDepth(it.hostNs) }
+            resumeDepthPreview()
+            main.post {
+                capturing = false
+                binding.shutterProgress.visibility = View.GONE
+                updateShutter()
+            }
+            val failure = off.exceptionOrNull() ?: lit.exceptionOrNull()
+            if (failure != null) {
+                Log.e(TAG, "lucid pair failed", failure)
+                main.post { pendingSaves--; updateShutter(); showMessage(failure.message ?: "capture failed") }
+                return@execute
+            }
+            val litCap = lit.getOrThrow()
+            showLucidThumbnail(litCap)
+            fun pairJson(role: String, partner: String) = org.json.JSONObject().apply {
+                put("role", role)
+                put("partner", partner)
+                put("kind", "lucid_flash")
+                put("lights", label)
+                put("nir_light", nirOn)
+                put("white_light", if (aOn) white.description else null)
+                put("lamp_a", a)
+                put("lamp_b", b)
+                put("lamp_b_lit", bOn)
+                put("lamp_b_light", if (bOn) white.lampBDescription else null)
+                put("settle_ms", settleMs)
+                put("order", "ambient first")
+                put("same_shutters", true)
+            }
+            saver.execute {
+                val message = try {
+                    val saved = CaptureStore.save(
+                        this, null, camera.info, litStamp, flash = flashRecord(nirOn, aOn),
+                        depth = depth?.getOrNull(), depthDevice = helios.info,
+                        lucid = litCap, lucidDevice = lucid.info,
+                        compare = pairJson("lit", offStamp),
+                    ).size + CaptureStore.save(
+                        this, null, camera.info, offStamp, flash = flashRecord(false),
+                        lucid = off.getOrThrow(), lucidDevice = lucid.info,
+                        compare = pairJson("ambient", litStamp),
+                    ).size
+                    getString(R.string.status_saved_compare, saved)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "saving lucid pair failed", t)
+                    t.message ?: t.javaClass.simpleName
+                }
+                main.post { pendingSaves--; updateShutter(); showMessage(message) }
             }
         }
     }
@@ -1275,9 +1408,14 @@ class MainActivity : AppCompatActivity() {
             // shooting is over. Every light is off for the ambient half, ALWAYS's too.
             // A lamp takes far longer than an LED to come up and go out: the relay or plug,
             // then the lamp's own warm-up and decay.
-            val settleMs = if (lights.phone) maxOf(LIGHT_SETTLE_MS, white.settleMs) else LIGHT_SETTLE_MS
-            val wasLit = white.isOn || light.isOn
+            val settleMs = maxOf(
+                LIGHT_SETTLE_MS,
+                if (lights.a) white.settleMs else 0L,
+                if (lights.b) WhiteLight.RELAY_SETTLE_MS else 0L,
+            )
+            val wasLit = white.isOn || white.lampBOn || light.isOn
             if (white.isOn) white.set(false)
+            if (white.lampBOn) white.setLampB(false)
             if (light.isOpen) runCatching { light.setOff() }.onFailure { Log.w(TAG, "nir light off", it) }
             if (wasLit) Thread.sleep(settleMs)
 
@@ -1302,17 +1440,20 @@ class MainActivity : AppCompatActivity() {
             val litStamp = CaptureStore.newStamp()
             var nirOn = false
             var phoneOn = false
+            var lampBOn = false
             val (lit, litDepth) = if (ambient.isFailure) {
                 Pair(Result.failure<List<JaiCamera.Capture>>(ambient.exceptionOrNull()!!), null)
             } else try {
                 nirOn = lights.nir && light.isOpen &&
                     runCatching { light.setOn(); true }.onFailure { Log.w(TAG, "nir light on", it) }.getOrDefault(false)
-                phoneOn = lights.phone && white.set(true)
-                if (phoneOn || nirOn) Thread.sleep(settleMs)
+                phoneOn = lights.a && white.set(true)
+                lampBOn = lights.b && white.setLampB(true)
+                if (phoneOn || lampBOn || nirOn) Thread.sleep(settleMs)
                 burst(R.string.compare_lit) {}
             } finally {
                 // Off (the relay lamp's rewind with it) before anything else happens.
                 if (phoneOn || white.isOn) white.set(false)
+                if (lampBOn || white.lampBOn) white.setLampB(false)
                 if (light.isOpen) runCatching { light.setOff() }.onFailure { Log.w(TAG, "nir light off", it) }
             }
             if (flash == Flash.ALWAYS) runCatching { syncFlash() }.onFailure { Log.w(TAG, "flash restore", it) }
@@ -1337,12 +1478,17 @@ class MainActivity : AppCompatActivity() {
                 put("role", role)
                 put("partner", partner)
                 put("nir_light", lights.nir)
-                put("phone_torch", lights.phone)
+                put("phone_torch", lights.a)
+                // Lamp A is the white light (below); lamp B the relay's plain on/off lamp.
+                put("lamp_a", lights.a)
+                put("lamp_b", lights.b)
+                put("lamp_b_lit", lampBOn)
+                put("lamp_b_light", if (lights.b) white.lampBDescription else null)
                 put("nir_lit", nirOn)
                 put("phone_lit", phoneOn)
                 put("phone_torch_level", if (phoneOn) white.level else 0)
                 // What "phone" meant for this shot: a Tapo plug's lamp or the phone's LED.
-                put("white_light", if (lights.phone) white.description else null)
+                put("white_light", if (lights.a) white.description else null)
                 put("settle_ms", settleMs)
                 put("same_shutters", true)
             }

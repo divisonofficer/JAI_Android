@@ -6,6 +6,11 @@
     <string name="source_rgb">RGB</string>
     <string name="source_nir">NIR</string>
     <string name="wb_label">WB</string>
+    <string name="lfm_label">LFM</string>
+    <string name="lfm_fmt">Lucid HDR enhancement (LED flicker): %1$s</string>
+    <string name="lfm_on">on</string>
+    <string name="lfm_off">off</string>
+    <string name="lfm_unknown">not supported by this camera</string>
     <string name="clip_on">Clip</string>
     <string name="clip_off">Clip</string>
     <string name="shutter_reading_fmt">S %1$s</string>
@@ -54,8 +59,10 @@
     <string name="viewer_ev_fmt">EV %1$s</string>
     <string name="compare_off">CMP OFF</string>
     <string name="compare_nir">CMP NIR</string>
-    <string name="compare_phone">CMP PHONE</string>
-    <string name="compare_both">CMP BOTH</string>
+    <string name="compare_a">CMP A</string>
+    <string name="compare_b">CMP B</string>
+    <string name="compare_ab">CMP A+B</string>
+    <string name="compare_no_lamp_b">Lamp B needs the relay module: not connected</string>
     <string name="compare_progress_fmt">%1$s %2$d/%3$d</string>
     <string name="compare_lit">LIT</string>
     <string name="compare_ambient">AMBIENT</string>

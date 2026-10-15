@@ -11,8 +11,9 @@ import com.cgjnkim.mobile_jai.jai.RawFrame
  *
  * The sensor merges its sub-exposures on chip into one 24-bit linear value per pixel,
  * which is what a capture keeps: BayerRG24, with everything the camera would do to it
- * afterwards switched off -- the tone-mapping LUT, white balance, colour transform and
- * "HDR image enhancement" -- so the numbers stay proportional to light.
+ * afterwards switched off -- the tone-mapping LUT, white balance, colour transform and,
+ * unless asked for ([setHdrEnhancement]), "HDR image enhancement" -- so the numbers stay
+ * proportional to light.
  *
  * The preview is BayerRG8 through the camera's strongest tone LUT (gamma 0.2), at the
  * capture's exposure and gain, so the shadows an HDR scene keeps are visible when setting
@@ -47,6 +48,8 @@ class TritonCamera : LucidCamera("Triton") {
         val packetSize: Int = 1476,
         /** The JAI takes .200 and the Helios .201. */
         val cameraHostPart: Int = 202,
+        /** The camera's "HDR image enhancement"; see [setHdrEnhancement]. */
+        val hdrEnhancement: Boolean = false,
     )
 
     /** What a capture was taken at, read back from the camera. */
@@ -56,6 +59,8 @@ class TritonCamera : LucidCamera("Triton") {
         val pixelFormat: String,
         val hdrOutput: String,
         val temperatureC: Double?,
+        /** HDRImageEnhancementEnable as read back; null when the camera has no such node. */
+        val hdrEnhancement: Boolean? = null,
     )
 
     /** One raw frame, and how long after [afterHostNs] of the capture call it was exposed. */
@@ -95,9 +100,9 @@ class TritonCamera : LucidCamera("Triton") {
         tryDo("GainAuto") { n.ensureEnum("GainAuto", "Off") }
         tryDo("ExposureTime") { setExposureLocked(n, config.exposureUs) }
         tryDo("Gain") { setGainLocked(n, config.gainDb) }
-        // Off in either format: the capture's numbers stay proportional to light, and the
-        // preview is balanced on the phone (TritonDisplay.renderPreview).
-        tryDo("HDRImageEnhancementEnable") { n.ensureBool("HDRImageEnhancementEnable", false) }
+        // Off by default: the capture's numbers stay proportional to light, and the preview
+        // is balanced on the phone (TritonDisplay.renderPreview). See setHdrEnhancement.
+        tryDo("HDRImageEnhancementEnable") { n.ensureBool("HDRImageEnhancementEnable", config.hdrEnhancement) }
         tryDo("BalanceWhiteAuto") { n.ensureEnum("BalanceWhiteAuto", "Off") }
         tryDo("BalanceWhiteEnable") { n.ensureBool("BalanceWhiteEnable", false) }
         tryDo("ColorTransformationEnable") { n.ensureBool("ColorTransformationEnable", false) }
@@ -176,6 +181,34 @@ class TritonCamera : LucidCamera("Triton") {
         return gainDb
     }
 
+    /**
+     * The camera's "HDR image enhancement", which includes its LED flicker mitigation.
+     *
+     * Off, the IMX490's on-chip merge is all there is, and a PWM-driven LED breaks it: above
+     * a channel's switch-over level the merge takes a short sub-exposure that can miss the
+     * LED's on-time, and that channel then reads exactly 0 -- rings of green, black and
+     * magenta around the lamp at a 1-5 ms shutter. On, the camera is meant to handle that,
+     * at the cost of processing after the merge, so a frame may no longer be strictly
+     * proportional to light; every capture records which it was (Settings.hdrEnhancement).
+     *
+     * Written while stopped when the camera will not take it streaming. Returns the value
+     * read back, or null when the camera has no such node.
+     */
+    fun setHdrEnhancement(on: Boolean): Boolean? = synchronized(nodeLock) {
+        val n = requireNodes()
+        config = config.copy(hdrEnhancement = on)
+        val direct = runCatching { n.ensureBool("HDRImageEnhancementEnable", on) }
+        if (direct.isFailure && isStreaming) {
+            Log.i(TAG, "HDRImageEnhancementEnable while streaming failed (${direct.exceptionOrNull()?.message}); restarting")
+            stop()
+            tryDo("HDRImageEnhancementEnable") { n.ensureBool("HDRImageEnhancementEnable", on) }
+            start()
+        } else direct.onFailure { Log.w(TAG, "HDRImageEnhancementEnable", it) }
+        runCatching { n.getBool("HDRImageEnhancementEnable") }.getOrNull().also {
+            Log.i(TAG, "HDR image enhancement: asked $on, reads $it")
+        }
+    }
+
     // ---- frames -----------------------------------------------------------------------
 
     /** The newest preview frame (BayerRG8), or null before the first. */
@@ -199,6 +232,7 @@ class TritonCamera : LucidCamera("Triton") {
                 pixelFormat = CAPTURE_FORMAT,
                 hdrOutput = runCatching { n.getEnum("HDROutput") }.getOrDefault("?"),
                 temperatureC = runCatching { n.getFloat("DeviceTemperature") }.getOrNull(),
+                hdrEnhancement = runCatching { n.getBool("HDRImageEnhancementEnable") }.getOrNull(),
             )
         }
         Log.i(TAG, "capture: block ${g.frame.blockId} ${g.frame.width}x${g.frame.height}, %.0f ms after start".format(

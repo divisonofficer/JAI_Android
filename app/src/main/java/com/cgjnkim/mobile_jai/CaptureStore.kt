@@ -186,7 +186,10 @@ object CaptureStore {
         put("sample_bits", 24)
         put("storage", "float32 holding the 24-bit linear count exactly")
         put("hdr_output", c.settings.hdrOutput)
-        put("processing", "none: LUT, white balance, colour transform and HDR image enhancement off")
+        put("hdr_image_enhancement", c.settings.hdrEnhancement ?: JSONObject.NULL)
+        put("processing", if (c.settings.hdrEnhancement == true)
+            "LUT, white balance and colour transform off; HDR image enhancement (LED flicker mitigation) ON, so values may not be strictly linear"
+        else "none: LUT, white balance, colour transform and HDR image enhancement off")
         put("exposure_us", c.settings.exposureUs)
         put("gain_db", c.settings.gainDb)
         c.settings.temperatureC?.let { put("temperature_c", it) }

@@ -50,6 +50,25 @@ class WhiteLight(context: Context) {
         ?: plug?.let { "Tapo ${it.model} ${it.mac}" }
         ?: "phone torch"
 
+    /** Lamp B: the relay module's other channel, a plain on/off lamp. Only with the relay. */
+    val hasLampB: Boolean get() = relay != null
+
+    @Volatile var lampBOn = false
+        private set
+
+    val lampBDescription: String get() = relay?.let { "Relay lamp B (P4851-4 ch$LAMP_B_CHANNEL @ ${it.address.hostAddress})" } ?: "no lamp B"
+
+    /** Lamp B on or off: one switch, no modes. Returns whether it is now so. */
+    fun setLampB(on: Boolean): Boolean {
+        val r = relay ?: return false
+        Log.i(TAG, "lamp B ${if (on) "on" else "off"}")
+        return runCatching {
+            r.set(LAMP_B_CHANNEL, if (LAMP_B_ON_NC) !on else on)
+            lampBOn = on
+            true
+        }.getOrElse { Log.w(TAG, "lamp B did not switch", it); false }
+    }
+
     /** The phone LED's level when it is the light, else 1: a relay or a plug is on or off. */
     val level: Int get() = if (relay != null || plug != null) 1 else torch.maxLevel
 
@@ -162,6 +181,7 @@ class WhiteLight(context: Context) {
         relay?.let { r ->
             runCatching { r.status() }.onSuccess { s ->
                 relayLampOn = s.relays[RELAY_CHANNEL - 1] != RELAY_LAMP_ON_NC
+                lampBOn = s.relays[LAMP_B_CHANNEL - 1] != LAMP_B_ON_NC
                 return r
             }
             Log.w(TAG, "$r stopped answering")
@@ -176,8 +196,13 @@ class WhiteLight(context: Context) {
             if (found == null) return null
         }
         relayAddress = found.address
-        relayLampOn = runCatching { found.status().relays[RELAY_CHANNEL - 1] != RELAY_LAMP_ON_NC }.getOrDefault(false)
+        runCatching { found.status() }.onSuccess { s ->
+            relayLampOn = s.relays[RELAY_CHANNEL - 1] != RELAY_LAMP_ON_NC
+            lampBOn = s.relays[LAMP_B_CHANNEL - 1] != LAMP_B_ON_NC
+        }
         relay = found
+        // Lamp B is only ever lit for a comparison's lit half; on NC it lights itself at rest.
+        if (lampBOn) setLampB(false)
         return found
     }
 
@@ -227,6 +252,13 @@ class WhiteLight(context: Context) {
 
         /** WCH (Jiangsu Qinheng), the network chip on the P4851-4. */
         private const val RELAY_MAC_PREFIX = "38:3b:26"
+
+        /**
+         * Lamp B, added 2026-10-15: a plain on/off lamp on the module's other relay, wired
+         * to NC like lamp A -- it went dark when relay 1 was energized, and is lit at rest.
+         */
+        const val LAMP_B_CHANNEL = 1
+        const val LAMP_B_ON_NC = true
 
         /** The relay the lamp is wired through. */
         const val RELAY_CHANNEL = 2
