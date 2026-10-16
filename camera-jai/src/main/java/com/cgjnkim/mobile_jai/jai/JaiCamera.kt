@@ -425,19 +425,21 @@ class JaiCamera : AutoCloseable {
         return result.map { Capture(it, snapshot, rate, tickFrequency, clock.toHostNs(it.timestamp)) }
     }
 
+    /** A fixed exposure on both sensors; the burst path restores the preview's dial settings. */
+    fun captureLongExposure(exposureUs: Double, onTriggered: () -> Unit = {}): Result<Capture> {
+        require(exposureUs == 500_000.0 || exposureUs == 1_000_000.0 || exposureUs == 4_000_000.0)
+        return captureBurst(
+            Source.values().associateWith { doubleArrayOf(exposureUs) },
+            settleFrames = 0,
+            onTriggered = onTriggered,
+            requireExactExposure = true,
+        ).map { it.single() }
+    }
+
     /**
-     * A bracket for HDR: one full-resolution pair per step, each source at its own
-     * exposure for that step, then back to the preview with the dial's exposures put back.
-     *
-     * The camera stays in capture mode for the whole bracket; between steps only the
-     * exposures (and the frame rate that follows them) change. A frame already in the
-     * sensor when an exposure is written may still carry the old one, so each step waits
-     * for a pair whose exposure began after the write and then lets [settleFrames] more
-     * go by before taking one.
-     *
-     * @param exposures per source, one exposure per step; all arrays the same length
-     * @param onTriggered called once, when the first step is on its way
-     * @param onStep called after each step's pair is in hand, with its index
+     * Full-resolution pairs at each exposure, then restore the preview's dial settings.
+     * Each step waits for a frame started after the write and skips [settleFrames] more.
+     * [requireExactExposure] rejects hardware clamping for fixed long exposures.
      */
     fun captureBurst(
         exposures: Map<Source, DoubleArray>,
@@ -445,6 +447,7 @@ class JaiCamera : AutoCloseable {
         timeoutMs: Long = CAPTURE_TIMEOUT_MS,
         onTriggered: () -> Unit = {},
         onStep: (Int) -> Unit = {},
+        requireExactExposure: Boolean = false,
     ): Result<List<Capture>> {
         val steps = exposures.getValue(Source.RGB).size
         require(exposures.values.all { it.size == steps }) { "bracket lengths differ" }
@@ -458,9 +461,18 @@ class JaiCamera : AutoCloseable {
                 synchronized(nodeLock) {
                     requireNodes()
                     for (s in Source.values()) {
-                        exposureUs[s.index] = exposures.getValue(s)[k].coerceIn(MIN_EXPOSURE_US, MAX_EXPOSURE_US)
+                        val limit = if (requireExactExposure) 4_000_000.0 else MAX_EXPOSURE_US
+                        exposureUs[s.index] = exposures.getValue(s)[k].coerceIn(MIN_EXPOSURE_US, limit)
                     }
                     if (k == 0) applyMode(Mode.CAPTURE) else applyTiming()
+                    if (requireExactExposure) {
+                        for (s in Source.values()) {
+                            val requested = exposures.getValue(s)[k]
+                            check(abs(exposureUs[s.index] - requested) <= 10.0) {
+                                "${s.label}: requested ${requested / 1e6} s, camera allows ${exposureUs[s.index] / 1e6} s"
+                            }
+                        }
+                    }
                     clock = control!!.latchClock(tickFrequency)
                     rate = frameRate
                     snapshot = Source.values().associateWith {
@@ -483,7 +495,9 @@ class JaiCamera : AutoCloseable {
     /** The first capture-format pair exposed after [afterTicks], then [skip] more. */
     private fun awaitPair(afterTicks: Long, skip: Int, rate: Double, timeoutMs: Long): FramePair {
         val period = (1000 / max(rate, 0.1)).toLong()
-        val deadline = System.currentTimeMillis() + timeoutMs + period * (1 + skip)
+        // A frame may already be integrating at the clock latch. Allow it to finish,
+        // then receive a whole new exposure (plus any deliberately skipped frames).
+        val deadline = System.currentTimeMillis() + timeoutMs + period * (2 + skip)
         var after = afterTicks
         var remaining = skip
         synchronized(pairLock) {

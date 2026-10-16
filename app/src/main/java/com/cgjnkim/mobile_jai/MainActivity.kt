@@ -3,14 +3,18 @@ package com.cgjnkim.mobile_jai
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.View
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.cgjnkim.mobile_jai.databinding.ActivityMainBinding
@@ -87,6 +91,40 @@ class MainActivity : AppCompatActivity() {
     private val lucidWorker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences("camera", MODE_PRIVATE) }
+    private var localNetworkAllowed = false
+    private var networkPermissionPending = false
+    private val networkPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        networkPermissionPending = false
+        localNetworkAllowed = granted
+        nextConnectAt = 0
+        nextLightAt = 0
+        nextHeliosAt = 0
+        showStatus()
+        showLight()
+        showDepthStatus()
+        if (!granted) showMessage(getString(R.string.network_permission_message))
+    }
+
+    private fun hasLocalNetworkPermission() = Build.VERSION.SDK_INT < 37 ||
+        ContextCompat.checkSelfPermission(this, LOCAL_NETWORK_PERMISSION) == PackageManager.PERMISSION_GRANTED
+
+    private fun requestLocalNetworkPermission() {
+        if (hasLocalNetworkPermission() || networkPermissionPending) return
+        if (prefs.getBoolean("network_permission_requested", false) &&
+            !shouldShowRequestPermissionRationale(LOCAL_NETWORK_PERMISSION)) {
+            AlertDialog.Builder(this)
+                .setMessage(R.string.network_permission_settings)
+                .setPositiveButton(R.string.open_settings) { _, _ ->
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+            return
+        }
+        networkPermissionPending = true
+        prefs.edit().putBoolean("network_permission_requested", true).apply()
+        networkPermission.launch(LOCAL_NETWORK_PERMISSION)
+    }
 
     private enum class Dial { SHUTTER, GAIN, LEVEL }
 
@@ -115,10 +153,20 @@ class MainActivity : AppCompatActivity() {
 
     /** The shutter takes a bracket for HDR instead of one pair; see [captureHdr]. */
     /** The shutter's HDR mode: off, the full four-frame bracket, or the fast pair. */
-    private enum class Hdr(val plan: BurstPlan?) { OFF(null), FULL(BurstPlan.FULL), FAST(BurstPlan.FAST) }
+    private enum class Hdr(val plan: BurstPlan?, val fixedExposureUs: Double? = null) {
+        OFF(null), FULL(BurstPlan.FULL), FAST(BurstPlan.FAST),
+        LONG_1S(null, 1_000_000.0), LONG_4S(null, 4_000_000.0),
+        LONG_HALF_S(null, 500_000.0),
+        LONG_SEQUENCE(null),
+        LUCID_REFERENCE(null),
+        LUCID_REFERENCE_6(null),
+        LUCID_DARK(null),
+        LUCID_REFERENCE_4(null),
+    }
 
+    @Volatile private var darkSequenceActive = false
     private var hdrMode = Hdr.OFF
-    private val hdr get() = hdrMode != Hdr.OFF
+    private val hdr get() = hdrMode.plan != null
     private val burstPlan get() = hdrMode.plan ?: BurstPlan.FULL
 
     /** With HDR: which lights a flash comparison lights its first bracket with; OFF for none. */
@@ -138,6 +186,7 @@ class MainActivity : AppCompatActivity() {
     private var compare = Compare.OFF
     /** The comparison's white light: a Tapo plug's lamp when one is on Wi-Fi, else the phone's LED. */
     private val white by lazy { WhiteLight(this) }
+    private val torch by lazy { PhoneTorch(this) }
     @Volatile private var whiteSearching = false
     private var vpnHintShown = false
     private var nextWhiteAt = 0L
@@ -177,6 +226,9 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var connecting = false
     private var nextConnectAt = 0L
     private var capturing = false
+    @Volatile private var sequenceCancelled = false
+    @Volatile private var phoneSequenceActive = false
+    private val sequenceTorchLock = Any()
     private var pendingSaves = 0
 
     private var previewBitmap: Bitmap? = null
@@ -186,12 +238,17 @@ class MainActivity : AppCompatActivity() {
 
     private val previewTick = object : Runnable {
         override fun run() {
+            // Do not send discovery packets until Android has granted LAN access.
+            if (!localNetworkAllowed) {
+                main.postDelayed(this, PREVIEW_INTERVAL_MS)
+                return
+            }
             renderPreview()
             if (!camera.isOpen && !connecting && SystemClock.uptimeMillis() >= nextConnectAt) connect()
             if (!light.isOpen && !lightConnecting && SystemClock.uptimeMillis() >= nextLightAt) connectLight()
             if (!whiteSearching && !capturing && SystemClock.uptimeMillis() >= nextWhiteAt) findWhiteLight()
             if (light.isOpen && !capturing && SystemClock.uptimeMillis() >= nextLightCheckAt) checkLight()
-            if (!helios.isOpen && !heliosConnecting && SystemClock.uptimeMillis() >= nextHeliosAt) connectHelios()
+            if (!capturing && !helios.isOpen && !heliosConnecting && SystemClock.uptimeMillis() >= nextHeliosAt) connectHelios()
             if (!lucid.isOpen && !lucidConnecting && SystemClock.uptimeMillis() >= nextLucidAt) connectLucid()
             main.postDelayed(this, PREVIEW_INTERVAL_MS)
         }
@@ -201,7 +258,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        requestLocalNetwork()
+        localNetworkAllowed = hasLocalNetworkPermission()
 
         for (s in Source.values()) {
             shutterUs[s.index] = prefs.getLong("shutter_${s.label}", shutterUs[s.index])
@@ -250,6 +307,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
         hdrMode = Hdr.values().getOrElse(prefs.getInt("hdr_mode", if (prefs.getBoolean("hdr", false)) 1 else 0)) { Hdr.OFF }
+        // Replace the old individual presets with a single three-exposure sequence.
+        if (hdrMode.fixedExposureUs != null) hdrMode = Hdr.LONG_SEQUENCE
         binding.toggleHdr.setOnClickListener { toggleHdr() }
         compare = Compare.values().getOrElse(prefs.getInt("compare", 0)) { Compare.OFF }
         binding.toggleCompare.setOnClickListener { cycleCompare() }
@@ -260,10 +319,17 @@ class MainActivity : AppCompatActivity() {
         showStatus()
         showLight()
         showDepthStatus()
+        if (!localNetworkAllowed && !prefs.getBoolean("network_permission_requested", false)) {
+            requestLocalNetworkPermission()
+        }
     }
 
     override fun onStart() {
         super.onStart()
+        localNetworkAllowed = hasLocalNetworkPermission()
+        showStatus()
+        showLight()
+        showDepthStatus()
         nextConnectAt = 0
         nextLightAt = 0
         nextWhiteAt = 0
@@ -283,6 +349,11 @@ class MainActivity : AppCompatActivity() {
     /** Lets go of the camera: control privilege is exclusive, and a backgrounded app should not hold it. */
     override fun onStop() {
         super.onStop()
+        // A torch left burning by an interrupted comparison would stay on for anyone.
+        synchronized(sequenceTorchLock) {
+            sequenceCancelled = true
+            if (torch.isOn) torch.set(false)
+        }
         // A light left burning by an interrupted comparison would stay on for anyone. On the
         // light worker: switching a plug is a network call.
         lightWorker.execute {
@@ -312,28 +383,10 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    /**
-     * Android 17 makes the local network a runtime permission: without it nothing on the
-     * Ethernet link -- cameras, lights, relay -- can be reached at all. The connect loops
-     * just keep retrying, so once it is granted they find everything on their next pass.
-     */
-    private fun requestLocalNetwork() {
-        if (Build.VERSION.SDK_INT < LOCAL_NETWORK_API) return
-        if (ContextCompat.checkSelfPermission(this, LOCAL_NETWORK) == PackageManager.PERMISSION_GRANTED) return
-        requestPermissions(arrayOf(LOCAL_NETWORK), REQUEST_LOCAL_NETWORK)
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_LOCAL_NETWORK && grantResults.firstOrNull() != PackageManager.PERMISSION_GRANTED) {
-            showMessage(getString(R.string.local_network_denied))
-        }
-    }
-
     // ---- connection ---------------------------------------------------------------
 
     private fun connect() {
+        if (!localNetworkAllowed) return
         connecting = true
         showStatus()
         scout.execute {
@@ -403,6 +456,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Drops the connection; the preview tick opens it again on its next pass. */
     private fun reconnect() {
+        if (!localNetworkAllowed) { requestLocalNetworkPermission(); return }
         if (connecting) return
         worker.execute {
             camera.close()
@@ -418,6 +472,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.dotCamera.background.mutate().setTint(ContextCompat.getColor(this, color))
         binding.chipInfo.text = when {
+            !localNetworkAllowed -> getString(R.string.status_network_permission)
             // The measured rate belongs to whichever camera the preview shows.
             camera.isOpen -> getString(
                 R.string.info_fmt, if (showDepth) camera.frameRate else previewFps(), camera.info?.address?.hostAddress ?: "",
@@ -541,6 +596,7 @@ class MainActivity : AppCompatActivity() {
     // ---- depth camera --------------------------------------------------------------
 
     private fun connectHelios() {
+        if (!localNetworkAllowed) return
         if (GigeDiscovery.findLink() == null) { nextHeliosAt = SystemClock.uptimeMillis() + RETRY_MS; return }
         heliosConnecting = true
         showDepthStatus()
@@ -572,6 +628,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reconnectHelios() {
+        if (!localNetworkAllowed) { requestLocalNetworkPermission(); return }
         if (heliosConnecting) return
         heliosWorker.execute {
             helios.close()
@@ -587,6 +644,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.dotDepth.background.mutate().setTint(ContextCompat.getColor(this, color))
         binding.depthInfo.text = when {
+            !localNetworkAllowed -> getString(R.string.status_network_permission)
             helios.isOpen -> {
                 val info = getString(
                     R.string.depth_info_fmt, if (showDepth) previewFps() else helios.frameRate,
@@ -603,6 +661,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun selectDepth() {
+        if (capturing) return
         if (showDepth) {
             depthView = if (depthView == DepthRenderer.View.DEPTH) DepthRenderer.View.INTENSITY else DepthRenderer.View.DEPTH
         }
@@ -746,14 +805,26 @@ class MainActivity : AppCompatActivity() {
         binding.toggleWb.setTextColor(if (previewWb) accent else quiet)
         binding.toggleLfm.visibility = if (lucid.isOpen) View.VISIBLE else View.GONE
         binding.toggleLfm.setTextColor(if (lucidEnhance) accent else quiet)
-        binding.toggleHdr.setTextColor(if (hdr) accent else quiet)
-        binding.toggleHdr.setText(if (hdrMode == Hdr.FAST) R.string.hdr_fast_label else R.string.hdr_label)
+        binding.toggleHdr.setTextColor(if (hdrMode != Hdr.OFF) accent else quiet)
+        binding.toggleHdr.setText(when (hdrMode) {
+            Hdr.FAST -> R.string.hdr_fast_label
+            Hdr.LONG_1S -> R.string.long_1s_label
+            Hdr.LONG_4S -> R.string.long_4s_label
+            Hdr.LONG_HALF_S -> R.string.long_half_s_label
+            Hdr.LONG_SEQUENCE -> R.string.long_sequence_label
+            Hdr.LUCID_REFERENCE -> R.string.reference_label
+            Hdr.LUCID_REFERENCE_6 -> R.string.reference_6_label
+            Hdr.LUCID_REFERENCE_4 -> R.string.reference_4_label
+            Hdr.LUCID_DARK -> R.string.dark_label
+            else -> R.string.hdr_label
+        })
         binding.toggleCompare.visibility = if (hdr) View.VISIBLE else View.GONE
         binding.toggleCompare.setText(compare.label)
         binding.toggleCompare.setTextColor(if (compare != Compare.OFF) accent else quiet)
     }
 
     private fun cycleCompare() {
+        if (capturing) return
         compare = Compare.values()[(compare.ordinal + 1) % Compare.values().size]
         prefs.edit().putInt("compare", compare.ordinal).apply()
         showModes()
@@ -791,9 +862,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleHdr() {
-        hdrMode = Hdr.values()[(hdrMode.ordinal + 1) % Hdr.values().size]
+        if (capturing) return
+        // Keep persisted enum indices stable while presenting exposures in ascending order.
+        val modes = listOf(Hdr.OFF, Hdr.FULL, Hdr.FAST, Hdr.LONG_SEQUENCE, Hdr.LUCID_REFERENCE, Hdr.LUCID_REFERENCE_6, Hdr.LUCID_REFERENCE_4, Hdr.LUCID_DARK)
+        hdrMode = modes[(modes.indexOf(hdrMode) + 1) % modes.size]
         prefs.edit().putInt("hdr_mode", hdrMode.ordinal).apply()
         showModes()
+        if (hdrMode == Hdr.LONG_SEQUENCE) showMessage(getString(R.string.long_sequence_hint))
+        if (hdrMode == Hdr.LUCID_REFERENCE) showMessage(getString(R.string.reference_hint))
+        if (hdrMode == Hdr.LUCID_REFERENCE_4) showMessage(getString(R.string.reference_4_hint))
+        if (hdrMode == Hdr.LUCID_REFERENCE_6) showMessage(getString(R.string.reference_6_hint))
+        if (hdrMode == Hdr.LUCID_DARK) showMessage(getString(R.string.dark_hint))
+        hdrMode.fixedExposureUs?.let {
+            showMessage(getString(R.string.long_exposure_hint, ExposureStops.formatShutter(it.toLong())))
+        }
         if (hdr) {
             // What the shutter will now do, in the dial's own terms: the bracket around it.
             val bracket = burstPlan.exposures(mapOf(Source.RGB to shutterUs[0].toDouble(), Source.NIR to shutterUs[1].toDouble()))
@@ -857,6 +939,7 @@ class MainActivity : AppCompatActivity() {
      * reading set from what the camera took rather than what was asked for.
      */
     private fun onDialPicked(stop: ValueDial.Stop) {
+        if (capturing) return
         if (showLucid && dial != Dial.LEVEL) return onLucidDialPicked(stop)
         val s = source
         when (dial) {
@@ -923,6 +1006,7 @@ class MainActivity : AppCompatActivity() {
     // ---- flash --------------------------------------------------------------------
 
     private fun connectLight() {
+        if (!localNetworkAllowed) return
         val link = GigeDiscovery.findLink() ?: run { nextLightAt = SystemClock.uptimeMillis() + RETRY_MS; return }
         lightConnecting = true
         showLight()
@@ -967,6 +1051,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reconnectLight() {
+        if (capturing) return
+        if (!localNetworkAllowed) { requestLocalNetworkPermission(); return }
         if (lightConnecting) return
         lightHintShown = false
         lightWorker.execute {
@@ -976,6 +1062,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cycleFlash() {
+        if (capturing) return
         flash = Flash.values()[(flash.ordinal + 1) % Flash.values().size]
         prefs.edit().putInt("flash_mode", flash.ordinal).apply()
         applyFlash()
@@ -983,6 +1070,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cycleFlashTarget() {
+        if (capturing) return
         flashTarget = FlashTarget.values()[(flashTarget.ordinal + 1) % FlashTarget.values().size]
         prefs.edit().putInt("flash_target", flashTarget.ordinal).apply()
         applyFlash()
@@ -1016,6 +1104,7 @@ class MainActivity : AppCompatActivity() {
      * whichever lights are targeted; the rest are off. The NIR level goes first. On [lightWorker].
      */
     private fun syncFlash() {
+        if (phoneSequenceActive) return
         if (light.isOpen) {
             val applied = light.setLevel(flashLevelMa)
             main.post { flashLevelMa = applied }
@@ -1105,9 +1194,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun capture() {
+        if (darkSequenceActive) {
+            sequenceCancelled = true
+            showMessage("DARK stopping after current frame")
+            return
+        }
+
         if (capturing || pendingSaves >= MAX_PENDING_SAVES || (!camera.isOpen && !lucid.isOpen)) return
-        // Brackets are the JAI's; with only the Lucid there, the shutter takes its one frame --
-        // or, with lights to compare (CMP under HDR, else the flash), an unlit/lit pair of them.
+        if (hdrMode == Hdr.LUCID_DARK) {
+            if (!lucid.isOpen) { showMessage("DARK requires Lucid camera"); return }
+            AlertDialog.Builder(this).setTitle(R.string.dark_title).setMessage(R.string.dark_instructions)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.dark_start) { _, _ ->
+                    if (!capturing && lucid.isOpen && pendingSaves < MAX_PENDING_SAVES) captureLucidDark()
+                }.show()
+            return
+        }
+        if (hdrMode == Hdr.LUCID_REFERENCE || hdrMode == Hdr.LUCID_REFERENCE_6 || hdrMode == Hdr.LUCID_REFERENCE_4) {
+            if (!lucid.isOpen) { showMessage("REF requires a connected Lucid camera"); return }
+            return captureLucidReference(includeTwoSeconds = hdrMode == Hdr.LUCID_REFERENCE, includeOneSecond = hdrMode != Hdr.LUCID_REFERENCE_4)
+        }
+        if (hdrMode == Hdr.LONG_SEQUENCE && camera.isOpen) return captureLongSequence()
+        // Brackets are the JAI's; with only the Lucid there, the shutter takes its one frame.
         if (hdr && camera.isOpen) return if (compare != Compare.OFF) captureCompare() else captureHdr()
         if (!camera.isOpen && lucid.isOpen) {
             if (hdr && compare != Compare.OFF) return captureLucidPair(compare.nir, compare.a, compare.b, "cmp ${compare.name}")
@@ -1180,6 +1288,345 @@ class MainActivity : AppCompatActivity() {
                         t.message ?: t.javaClass.simpleName
                     }
                     main.post { pendingSaves--; updateShutter(); showMessage(message) }
+                }
+            }
+        }
+    }
+
+    /** Save each completed exposure independently, including if a later shot fails. */
+    /** Actual integrations at fixed gain, paired by illumination and exposure in JSON. */
+    private fun captureLucidDark() {
+        capturing = true; darkSequenceActive = true; sequenceCancelled = false
+        phoneSequenceActive = true; pendingSaves++
+        binding.shutterProgress.visibility = View.VISIBLE; updateShutter()
+        lucidWorker.execute {
+            val originalExposure = lucid.exposureUs
+            val originalGain = lucid.gainDb
+            val device = lucid.info
+            val group = CaptureStore.newStamp()
+            val exposures = listOf(originalExposure, 500_000.0, 1_000_000.0)
+            val records = exposures.mapIndexed { index, us -> org.json.JSONObject().apply {
+                put("slot", index); put("requested_exposure_us", us)
+                put("expected_frames", 30); put("saved_frames", 0); put("frames", org.json.JSONArray())
+            } }
+            var saved = 0
+            var failure: String? = null
+            fun summary() = org.json.JSONObject().apply {
+                put("id", group); put("type", "lucid_dark_calibration")
+                put("camera_serial", device?.serial ?: org.json.JSONObject.NULL)
+                put("expected_frames", 90); put("saved_frames", saved); put("complete", saved == 90)
+                put("cancelled", sequenceCancelled); put("error", failure ?: org.json.JSONObject.NULL)
+                put("lens_covered", "user_confirmed; not automatically verified")
+                put("unit", "24-bit RAW counts stored losslessly as float32")
+                put("cfa", "RGGB"); put("gain_db", originalGain)
+                put("estimator", "spatial median of temporal means; fixed grid, one 2x2 Bayer cell per 16x16 pixels")
+                put("interpretation", "residual dark signal after camera processing including dark current; not unclamped sensor black level")
+                put("clamping_policy", "unchanged; per-frame readback in RAW metadata, null means unavailable/read failed")
+                put("raw_processing", "no subtraction, normalization or defect correction")
+                put("caution", "Zero clipping biases estimates. Match exposure/gain/HDR/clamping/temperature. Light leaks cannot be excluded automatically.")
+                put("exposures", org.json.JSONArray(records))
+            }
+            try {
+                lucid.stopStreaming()
+                heliosWorker.submit { if (helios.isStreaming) helios.stopStreaming() }.get()
+                lightWorker.submit {
+                    if (light.isOpen) light.setOff()
+                    if (white.available) check(white.set(false)) { "Cannot turn white light off" }
+                    Thread.sleep(maxOf(LIGHT_SETTLE_MS, white.settleMs))
+                }.get()
+                for ((slot, exposure) in exposures.withIndex()) {
+                    var estimator: DarkLevelEstimator? = null
+                    for (repeat in 0 until 30) {
+                        check(!sequenceCancelled) { "Capture cancelled" }
+                        main.post { showMessage("DARK ${saved + 1}/90 · ${ExposureStops.formatShutter(exposure.toLong())} · shutter to stop") }
+                        heliosWorker.submit { if (helios.isStreaming) helios.stopStreaming() }.get()
+                        val cap = lucid.captureAtExposure(exposure, originalGain).getOrThrow()
+                        val stamp = CaptureStore.newStamp()
+                        val sequence = org.json.JSONObject().apply {
+                            put("id", group); put("type", "lucid_dark_calibration")
+                            put("index", slot * 30 + repeat); put("count", 90)
+                            put("exposure_index", slot); put("repeat_index", repeat)
+                            put("purpose", "dark_frame"); put("role", "dark")
+                            put("requested_exposure_us", exposure); put("actual_exposure_us", cap.settings.exposureUs)
+                            put("lens_covered", "user_confirmed"); put("white_lit", false)
+                            put("external_nir_light_on", false); put("summary_file", "${group}_black_level.json")
+                        }
+                        saver.submit<List<String>> {
+                            CaptureStore.save(this, null, null, stamp,
+                                flash = flashRecord(false).copy(mode = "off", whiteLit = false),
+                                lucid = cap, lucidDevice = device, sequence = sequence, writePreview = false)
+                        }.get()
+                        val estimate = estimator ?: DarkLevelEstimator(cap.frame.width, cap.frame.height).also { estimator = it }
+                        estimate.add(cap.frame.data); saved++
+                        val record = records[slot]
+                        record.put("saved_frames", estimate.frames)
+                        record.getJSONArray("frames").put(org.json.JSONObject().apply {
+                            put("stamp", stamp); put("raw", "${stamp}_lucid.tiff"); put("metadata", "${stamp}.json")
+                            put("actual_exposure_us", cap.settings.exposureUs)
+                            put("temperature_c", cap.settings.temperatureC ?: org.json.JSONObject.NULL)
+                        })
+                        record.put("channels", org.json.JSONArray(estimate.result().map { c -> org.json.JSONObject().apply {
+                            put("channel", c.name); put("residual_dark_level_counts", c.residualCounts)
+                            put("spatial_mad_counts", c.spatialMad); put("zero_fraction", c.zeroFraction)
+                            put("saturated_fraction", c.saturationFraction); put("sampled_pixels", c.samples)
+                        } }))
+                    }
+                }
+            } catch (e: Exception) {
+                failure = e.cause?.message ?: e.message ?: "Dark capture failed"
+                Log.e(TAG, "dark sequence", e)
+            } finally {
+                runCatching { val result = summary(); saver.submit { CaptureStore.saveDarkSummary(this, group, result) }.get() }
+                    .onFailure { failure = "Summary save failed: ${it.cause?.message ?: it.message}" }
+                runCatching { lucid.setExposure(originalExposure); lucid.setGain(originalGain) }
+                runCatching { lightWorker.submit {
+                    phoneSequenceActive = false
+                    if (!sequenceCancelled) syncFlash()
+                }.get() }
+                phoneSequenceActive = false
+                if (!sequenceCancelled) {
+                    runCatching { lucid.startStreaming() }; resumeDepthPreview()
+                }
+                val message = "DARK saved $saved/90 · ${group}_black_level.json" + (failure?.let { " · $it" } ?: "")
+                main.post {
+                    darkSequenceActive = false; capturing = false; pendingSaves--
+                    binding.shutterProgress.visibility = View.GONE; updateShutter(); showMessage(message)
+                }
+            }
+        }
+    }
+
+    private fun captureLucidReference(includeTwoSeconds: Boolean, includeOneSecond: Boolean) {
+        val shotCount = 2 * (2 + (if (includeOneSecond) 1 else 0) + (if (includeTwoSeconds) 1 else 0))
+        if (!white.available) { showMessage(getString(R.string.compare_no_torch)); return }
+        capturing = true
+        sequenceCancelled = false
+        phoneSequenceActive = true // Prevent preview flash resync during the sequence.
+        pendingSaves++
+        binding.shutterProgress.visibility = View.VISIBLE
+        updateShutter()
+        lucidWorker.execute {
+            val originalExposure = lucid.exposureUs
+            val originalGain = lucid.gainDb
+            val device = lucid.info
+            val group = CaptureStore.newStamp()
+            var completed = 0
+            var depthSaved = 0
+            var depthAttempted = false
+            var sharedDepthStamp: String? = null
+            var sharedDepthError: String? = null
+            val failedSteps = mutableListOf<String>()
+            var failure: String? = null
+            try {
+                val steps = PhoneExposurePlan.steps(originalExposure, originalExposure, includeTwoSeconds, includeOneSecond)
+                lucid.stopStreaming()
+                darkenDepth()
+                val lightName = lightWorker.submit<String> {
+                    if (light.isOpen) light.setOff()
+                    white.description
+                }.get()
+                var inputStamp = ""
+                var inputExposureUs = originalExposure
+                for (step in steps) {
+                    check(!sequenceCancelled) { "Capture cancelled" }
+                    if (step.slot == 0) {
+                        inputStamp = ""
+                        lightWorker.submit {
+                            check(!sequenceCancelled) { "Capture cancelled" }
+                            check(white.description == lightName && white.set(step.phoneOn)) { "White light unavailable or changed" }
+                            Thread.sleep(maxOf(LIGHT_SETTLE_MS, white.settleMs))
+                        }.get()
+                    }
+                    main.post { showMessage("REF ${step.index + 1}/$shotCount · ${if (step.phoneOn) "ON" else "OFF"} · ${ExposureStops.formatShutter(step.rgbUs.toLong())}") }
+                    // Drain queued depth preview operations before the RGB integration.
+                    heliosWorker.submit { if (helios.isStreaming) helios.stopStreaming() }.get()
+                    val attempt = lucid.captureAtExposure(step.rgbUs, originalGain)
+                    val cap = attempt.getOrNull()
+                    if (cap == null) {
+                        val detail = "${if (step.phoneOn) "ON" else "OFF"} ${step.rgbUs / 1e6}s: ${attempt.exceptionOrNull()?.message}"
+                        failedSteps += detail
+                        Log.e(TAG, "REF step ${step.index + 1} failed, continuing: $detail", attempt.exceptionOrNull())
+                        main.post { showMessage("REF ${step.index + 1}/$shotCount failed; continuing") }
+                        continue
+                    }
+                    check(!sequenceCancelled) { "Capture cancelled" }
+                    val (depthDevice, depthResult) = heliosWorker.submit<Pair<com.cgjnkim.mobile_jai.jai.GigeDeviceInfo?, Result<HeliosCamera.Capture>?>> {
+                        val info = helios.info
+                        info to if (!depthAttempted) grabDepth(cap.hostNs) else null
+                    }.get()
+                    val depth = depthResult?.getOrNull()
+                    val depthError = depthResult?.exceptionOrNull()
+                    depthError?.let { Log.w(TAG, "reference depth", it) }
+                    check(!sequenceCancelled) { "Capture cancelled" }
+                    val stamp = CaptureStore.newStamp()
+                    if (!depthAttempted) {
+                        depthAttempted = true
+                        if (depth != null) sharedDepthStamp = stamp
+                        sharedDepthError = depthError?.message
+                    }
+                    if (step.slot == 0) {
+                        inputStamp = stamp
+                        inputExposureUs = cap.settings.exposureUs
+                    }
+                    val sequence = org.json.JSONObject().apply {
+                        put("id", group); put("type", "lucid_short_long_reference")
+                        put("index", step.index); put("count", shotCount)
+                        put("exposure_index", step.slot); put("partner_index", step.partnerIndex)
+                        put("role", if (step.phoneOn) "lit" else "ambient")
+                        put("purpose", if (step.slot == 0) "input" else "reference_candidate")
+                        put("input_stamp", inputStamp.ifEmpty { null } ?: org.json.JSONObject.NULL)
+                        put("requested_exposure_us", step.rgbUs)
+                        put("actual_exposure_us", cap.settings.exposureUs)
+                        put("input_actual_exposure_us", if (inputStamp.isNotEmpty()) inputExposureUs else org.json.JSONObject.NULL)
+                        put("exposure_ratio_to_input", if (inputStamp.isNotEmpty()) cap.settings.exposureUs / inputExposureUs else org.json.JSONObject.NULL)
+                        put("gain_db", cap.settings.gainDb)
+                        put("white_light", lightName); put("white_lit", step.phoneOn)
+                        put("external_nir_light_on", false)
+                        put("clean_reference_verified", false)
+                        put("depth_status", if (depth != null) "captured" else if (sharedDepthStamp != null) "shared" else if (sharedDepthError != null) "failed" else "not_connected")
+                        sharedDepthStamp?.let { put("depth_capture_stamp", it) }
+                        put("depth_policy", "one frame after first successful RGB; shared by entire sequence")
+                        sharedDepthError?.let { put("depth_error", it) }
+                        put("earlier_failed_steps", org.json.JSONArray(failedSteps))
+                    }
+                    val illumination = flashRecord(false).copy(target = "rgb", whiteLit = step.phoneOn,
+                        white = if (step.phoneOn) lightName else null)
+                    saver.submit<List<String>> {
+                        CaptureStore.save(this, null, null, stamp, flash = illumination,
+                            depth = depth, depthDevice = depthDevice,
+                            lucid = cap, lucidDevice = device, sequence = sequence)
+                    }.get()
+                    completed++
+                    if (depth != null) depthSaved++
+                }
+            } catch (e: Exception) {
+                failure = e.cause?.message ?: e.message ?: "Reference capture failed"
+                Log.e(TAG, "reference sequence", e)
+            } finally {
+                runCatching {
+                    lightWorker.submit {
+                        white.set(false)
+                        phoneSequenceActive = false
+                        if (!sequenceCancelled) syncFlash()
+                    }.get()
+                }.onFailure { Log.w(TAG, "reference light restore", it) }
+                phoneSequenceActive = false
+                runCatching { lucid.setExposure(originalExposure); lucid.setGain(originalGain) }
+                    .onFailure { Log.w(TAG, "reference exposure restore", it) }
+                if (!sequenceCancelled) {
+                    runCatching { lucid.startStreaming() }.onFailure { Log.w(TAG, "reference preview", it) }
+                    resumeDepthPreview()
+                }
+                val message = "Saved $completed/$shotCount RGB + $depthSaved depth" +
+                    (if (depthSaved == 0) " · No depth" else " (shared)") +
+                    (failure?.let { " · $it" } ?: if (failedSteps.isNotEmpty()) " · ${failedSteps.size} exposures failed" else "")
+                main.post {
+                    capturing = false; pendingSaves--
+                    binding.shutterProgress.visibility = View.GONE
+                    updateShutter(); loadLastThumbnail(); showMessage(message)
+                }
+            }
+        }
+    }
+
+    private fun captureLongSequence() {
+        if (!torch.available) { showMessage(getString(R.string.compare_no_torch)); return }
+        capturing = true
+        sequenceCancelled = false
+        phoneSequenceActive = true
+        pendingSaves++
+        binding.shutterProgress.visibility = View.VISIBLE
+        updateShutter()
+        val selectedFlash = flash
+        worker.execute {
+            val groupStamp = CaptureStore.newStamp()
+            // Snapshot after queued dial writes, then reuse exactly for OFF and ON.
+            val device = camera.info
+            val depthDevice = helios.info
+            var completed = 0
+            var failure: String? = null
+            val lightRecord = flashRecord(false)
+            try {
+                val steps = PhoneExposurePlan.steps(camera.exposure(Source.RGB), camera.exposure(Source.NIR))
+                // This comparison uses the phone LED only, including if NIR was ALWAYS on.
+                lightWorker.submit {
+                    if (light.isOpen) light.setOff()
+                    check(white.set(false)) { "Could not switch white light OFF" }
+                    if (white.settleMs > 0) Thread.sleep(white.settleMs)
+                }.get()
+                darkenDepth()
+                for (step in steps) {
+                    check(!sequenceCancelled) { "Capture cancelled" }
+                    if (step.slot == 0) {
+                        synchronized(sequenceTorchLock) {
+                            check(!sequenceCancelled) { "Capture cancelled" }
+                            check(torch.set(step.phoneOn)) { "Could not switch phone flash ${if (step.phoneOn) "ON" else "OFF"}" }
+                        }
+                        Thread.sleep(LIGHT_SETTLE_MS)
+                    }
+                    main.post {
+                        showMessage(getString(R.string.long_sequence_progress, step.index + 1,
+                            if (step.phoneOn) "ON" else "OFF",
+                            if (step.slot == 0) "dial" else ExposureStops.formatShutter(step.rgbUs.toLong())))
+                    }
+                    val stamp = CaptureStore.newStamp()
+                    check(!sequenceCancelled) { "Capture cancelled" }
+                    val cap = camera.captureBurst(
+                        mapOf(Source.RGB to doubleArrayOf(step.rgbUs), Source.NIR to doubleArrayOf(step.nirUs)),
+                        settleFrames = 0, onTriggered = ::onTriggered, requireExactExposure = true,
+                    ).getOrThrow().single()
+                    // onStop may switch the LED off mid-exposure; do not label that as ON.
+                    check(!sequenceCancelled) { "Capture cancelled" }
+                    val depth = grabDepth(cap.hostTimeNs)
+                    depth?.exceptionOrNull()?.let { Log.w(TAG, "sequence depth", it) }
+                    val sequence = org.json.JSONObject().apply {
+                        put("id", groupStamp)
+                        put("type", "phone_flash_exposure_sequence")
+                        put("index", step.index)
+                        put("count", steps.size)
+                        put("exposure_index", step.slot)
+                        put("exposure_setting", if (step.slot == 0) "dial" else "fixed")
+                        put("role", if (step.phoneOn) "lit" else "ambient")
+                        put("partner_index", step.partnerIndex)
+                        put("phone_torch_on", step.phoneOn)
+                        put("phone_torch_level", if (step.phoneOn) torch.maxLevel else 0)
+                        put("external_nir_light_on", false)
+                        put("requested_rgb_exposure_us", step.rgbUs)
+                        put("requested_nir_exposure_us", step.nirUs)
+                        put("same_shutters", true)
+                    }
+                    // Wait for this shot to reach disk before advancing; earlier shots
+                    // survive a rejected exposure or a disconnection later in the sequence.
+                    saver.submit<List<String>> {
+                        CaptureStore.save(this, cap, device, stamp,
+                            flash = lightRecord.copy(target = "rgb", whiteLit = step.phoneOn,
+                                white = if (step.phoneOn) "phone torch" else null),
+                            depth = depth?.getOrNull(), depthDevice = depthDevice, sequence = sequence)
+                    }.get()
+                    completed++
+                    showThumbnail(cap.pair.rgb)
+                    darkenDepth()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "long exposure sequence failed", e)
+                failure = e.cause?.message ?: e.message ?: "capture failed"
+            } finally {
+                synchronized(sequenceTorchLock) { torch.set(false) }
+                lightWorker.submit {
+                    phoneSequenceActive = false
+                    if (!sequenceCancelled && selectedFlash == Flash.ALWAYS) {
+                        runCatching { syncFlash() }.onFailure { Log.w(TAG, "restoring light", it) }
+                    }
+                }.get()
+                resumeDepthPreview()
+                val message = if (failure == null) getString(R.string.long_sequence_saved)
+                    else getString(R.string.long_sequence_failed, completed, failure)
+                main.post {
+                    capturing = false
+                    pendingSaves--
+                    binding.shutterProgress.visibility = View.GONE
+                    updateShutter()
+                    showMessage(message)
                 }
             }
         }
@@ -1550,7 +1997,7 @@ class MainActivity : AppCompatActivity() {
      * for an out-of-memory kill.
      */
     private fun updateShutter() {
-        binding.shutter.isEnabled = (camera.isOpen || lucid.isOpen) && !capturing && pendingSaves < MAX_PENDING_SAVES
+        binding.shutter.isEnabled = darkSequenceActive || ((camera.isOpen || lucid.isOpen) && !capturing && pendingSaves < MAX_PENDING_SAVES)
     }
 
     private fun showMessage(text: String) {
@@ -1563,6 +2010,7 @@ class MainActivity : AppCompatActivity() {
     private val hideMessage = Runnable { binding.message.visibility = View.GONE }
 
     private companion object {
+        const val LOCAL_NETWORK_PERMISSION = "android.permission.ACCESS_LOCAL_NETWORK"
         const val TAG = "MobileJai"
         const val PREVIEW_INTERVAL_MS = 33L
         const val RETRY_MS = 3000L
@@ -1576,9 +2024,6 @@ class MainActivity : AppCompatActivity() {
         const val DEFAULT_RGB_US = 10_000L
         const val DEFAULT_NIR_US = 100_000L
         const val LIGHT_RETRY_MS = 10_000L
-        const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
-        const val LOCAL_NETWORK_API = 37
-        const val REQUEST_LOCAL_NETWORK = 7
         const val LIGHT_CHECK_MS = 5_000L
         const val HELIOS_RETRY_MS = 5_000L
         const val LUCID_RETRY_MS = 5_000L
