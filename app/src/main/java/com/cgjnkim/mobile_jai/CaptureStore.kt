@@ -78,6 +78,8 @@ object CaptureStore {
         lucidDevice: GigeDeviceInfo? = null,
         /** For one half of a flash on/off pair: the same "compare" object as an HDR burst's. */
         compare: JSONObject? = null,
+        sequence: JSONObject? = null,
+        writePreview: Boolean = true,
     ): List<String> {
         require(capture != null || lucid != null) { "nothing to save" }
         val written = mutableListOf<String>()
@@ -116,10 +118,13 @@ object CaptureStore {
 
         val jsonName = "${stamp}.json"
         write(context, files, DATA_PATH, jsonName, "application/json") { out ->
-            out.write(metadata(capture, device, stamp, flash, depth, depthDevice, lucid, lucidDevice, compare).toString(2).toByteArray())
+            val record = metadata(capture, device, stamp, flash, depth, depthDevice, lucid, lucidDevice, compare)
+            sequence?.let { record.put("sequence", it) }
+            out.write(record.toString(2).toByteArray())
         }
         written += jsonName
 
+        if (!writePreview) return written
         val jpegName = "${stamp}_rgb_preview.jpg"
         write(
             context, MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
@@ -190,6 +195,19 @@ object CaptureStore {
         put("processing", if (c.settings.hdrEnhancement == true)
             "LUT, white balance and colour transform off; HDR image enhancement (LED flicker mitigation) ON, so values may not be strictly linear"
         else "none: LUT, white balance, colour transform and HDR image enhancement off")
+        put("black_level_camera_setting", c.settings.blackLevel ?: JSONObject.NULL)
+        put("black_level_source", "camera_BlackLevel_node_readback")
+        put("black_level_written_by_app", false)
+        put("hdr_image_enhancement_enabled", c.settings.hdrImageEnhancement ?: JSONObject.NULL)
+        put("raw_processing_policy", "digital_clamp_off_enhancement_user_selected_camera_black_level_read_only")
+        put("sensor_analog_clamp", "mandatory_cannot_disable")
+        put("sensor_hdr_merge", "enabled")
+        put("software_black_level_subtracted", false)
+        put("software_clipping_applied", false)
+        put("black_level_selector", c.settings.blackLevelSelector ?: JSONObject.NULL)
+        put("black_level_setting_unit", "camera native node units; not assumed equal to RAW counts")
+        put("hdr_digital_clamping_enabled", c.settings.hdrDigitalClamping ?: JSONObject.NULL)
+        put("black_level_readback_status", if (c.settings.blackLevel == null) "unavailable_or_read_failed" else "read")
         put("exposure_us", c.settings.exposureUs)
         put("gain_db", c.settings.gainDb)
         c.settings.temperatureC?.let { put("temperature_c", it) }
@@ -280,7 +298,7 @@ object CaptureStore {
         put("timestamp_ticks", f.timestamp)
         put("block_id", f.raw.blockId)
         // Taken after the JAI's frames, with the ToF dark during them: see HeliosCamera.
-        put("sync", "sequential: ToF off while the JAI exposed, one frame grabbed after; delay by host-mapped device clocks")
+        put("sync", "sequential: ToF off while the colour camera exposed, one frame grabbed after; delay by host-mapped device clocks")
         put("delay_ms", d.skewNs / 1e6)
         put("orientation", "as the camera sends it, not rotated")
     }
@@ -358,6 +376,13 @@ object CaptureStore {
 
     /** Coord3D_ABCY16 components in order, as file suffixes. */
     private val DEPTH_PLANES = listOf("x", "y", "z", "intensity")
+
+    fun saveDarkSummary(context: Context, group: String, record: JSONObject) {
+        write(context, MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY),
+            DATA_PATH, "${group}_black_level.json", "application/json") {
+            it.write(record.toString(2).toByteArray())
+        }
+    }
 
     fun newStamp(): String = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
 }

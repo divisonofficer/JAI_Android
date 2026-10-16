@@ -1,4 +1,10 @@
 <resources>
+    <string name="reference_4_label">REF·4</string>
+    <string name="reference_4_hint">Lucid reference: light OFF then ON, each dial → 0.5 s. One shared depth frame when Helios is connected. Keep the camera and scene still.</string>
+    <string name="reference_6_label">REF·6</string>
+    <string name="reference_6_hint">Lucid reference: light OFF then ON, each dial → 0.5 s → 1 s. One shared depth frame after the first RGB when Helios is connected. Keep the camera and scene still.</string>
+    <string name="reference_label">REF·8</string>
+    <string name="reference_hint">Lucid reference: light OFF then ON, each dial → 0.5 s → 1 s → 2 s. One shared depth frame after the first RGB when Helios is connected. Keep the camera and scene still.</string>
     <string name="app_name">Mobile JAI</string>
     <string name="preview_description">Camera preview</string>
     <string name="shutter">Shutter</string>
@@ -18,6 +24,10 @@
     <string name="settings_fmt">RGB %1$s · %2$s dB  \u2502  NIR %3$s · %4$s dB</string>
     <string name="info_fmt">%1$.1f fps · %2$s</string>
     <string name="status_connecting">connecting…</string>
+    <string name="status_network_permission">Nearby devices permission required</string>
+    <string name="network_permission_message">Allow Nearby devices access to connect to the cameras and light. Tap a device status to try again.</string>
+    <string name="network_permission_settings">Allow Nearby devices in app settings to connect to the cameras and light.</string>
+    <string name="open_settings">Open settings</string>
     <string name="status_saved">saved %1$d files</string>
     <string name="status_no_link">Turn on Ethernet tethering with the camera plugged in</string>
     <string name="light_chip">LIGHT</string>
@@ -50,6 +60,15 @@
     <string name="status_saved_no_depth">saved %1$d files, no depth: %2$s</string>
     <string name="hdr_label">HDR</string>
     <string name="hdr_fast_label">HDR·2</string>
+    <string name="long_1s_label">1s</string>
+    <string name="long_half_s_label">0.5s</string>
+    <string name="long_sequence_label">PHONE·8</string>
+    <string name="long_sequence_hint">Phone OFF: dial → 0.5 s → 1 s → 2 s; then phone ON: same four exposures.</string>
+    <string name="long_sequence_progress">Capture %1$d/8 · Phone %2$s · %3$s</string>
+    <string name="long_sequence_saved">Saved 8 RAW captures: phone OFF + ON, dial / 0.5 s / 1 s / 2 s</string>
+    <string name="long_sequence_failed">Saved %1$d/8 captures · %2$s</string>
+    <string name="long_4s_label">4s</string>
+    <string name="long_exposure_hint">RGB + NIR: %1$s exposure per image. Preview uses the dial settings.</string>
     <string name="hdr_progress_fmt">HDR %1$d/%2$d</string>
     <string name="hdr_bracket_fmt">HDR %1$d × %2$s×: %3$s</string>
     <string name="status_saved_hdr">HDR saved: %1$d files</string>
@@ -134,4 +153,9 @@
     <string name="scene_set_cover">대표 이미지로 지정</string>
     <string name="scene_open_capture">열기</string>
     <string name="strip_more_fmt">+%1$d</string>
+    <string name="dark_label">DARK</string>
+    <string name="dark_hint">Dark capture: dial / 0.5s / 1s, 30 RAWs each. Cover lens.</string>
+    <string name="dark_title">Dark-frame calibration</string>
+    <string name="dark_instructions">Cover the Lucid lens completely with an opaque cap. Turning the room light off is not enough. Keep the camera warmed up at the target temperature.\n\nCaptures 30 RAWs each at dial exposure, 0.5s and 1s (90 frames, several minutes; allow about 2 GB free). Gain and HDR clamping are unchanged. White/NIR lights and depth are off during capture.\n\nSaves original RAWs and RGGB residual dark-signal estimates in JSON, without subtraction. Includes dark current; not a guaranteed sensor pedestal. Tap the shutter again to stop after the current frame.</string>
+    <string name="dark_start">Lens covered — start</string>
 </resources>

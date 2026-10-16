@@ -61,6 +61,10 @@ class TritonCamera : LucidCamera("Triton") {
         val temperatureC: Double?,
         /** HDRImageEnhancementEnable as read back; null when the camera has no such node. */
         val hdrEnhancement: Boolean? = null,
+        val blackLevel: Double? = null,
+        val blackLevelSelector: String? = null,
+        val hdrDigitalClamping: Boolean? = null,
+        val hdrImageEnhancement: Boolean? = null,
     )
 
     /** One raw frame, and how long after [afterHostNs] of the capture call it was exposed. */
@@ -100,9 +104,7 @@ class TritonCamera : LucidCamera("Triton") {
         tryDo("GainAuto") { n.ensureEnum("GainAuto", "Off") }
         tryDo("ExposureTime") { setExposureLocked(n, config.exposureUs) }
         tryDo("Gain") { setGainLocked(n, config.gainDb) }
-        // Off by default: the capture's numbers stay proportional to light, and the preview
-        // is balanced on the phone (TritonDisplay.renderPreview). See setHdrEnhancement.
-        tryDo("HDRImageEnhancementEnable") { n.ensureBool("HDRImageEnhancementEnable", config.hdrEnhancement) }
+        applyRawControls(n)
         tryDo("BalanceWhiteAuto") { n.ensureEnum("BalanceWhiteAuto", "Off") }
         tryDo("BalanceWhiteEnable") { n.ensureBool("BalanceWhiteEnable", false) }
         tryDo("ColorTransformationEnable") { n.ensureBool("ColorTransformationEnable", false) }
@@ -116,10 +118,26 @@ class TritonCamera : LucidCamera("Triton") {
         tryDo("LUTEnable") { n.ensureBool("LUTEnable", true) }
     }
 
-    /** Linear 24-bit, nothing applied after the sensor. Stopped. */
+    /** Bayer HDR output; mandatory sensor Analog Clamp and HDR merge remain. Stopped. */
     private fun raw(n: NodeMap) {
-        tryDo("LUTEnable") { n.ensureBool("LUTEnable", false) }
         n.ensureEnum("PixelFormat", CAPTURE_FORMAT)
+        applyRawControls(n)
+        n.ensureBool("LUTEnable", false)
+        check(!n.getBool("LUTEnable")) { "RAW LUT disable failed" }
+    }
+
+    /** Fail closed: never save frames under a silently different processing policy. */
+    private fun applyRawControls(n: NodeMap) {
+        for (name in listOf("HDRDigitalClampingEnable",
+            "BalanceWhiteEnable", "ColorTransformationEnable")) {
+            n.ensureBool(name, false)
+            check(!n.getBool(name)) { "$name could not be disabled" }
+        }
+        n.ensureBool("HDRImageEnhancementEnable", config.hdrEnhancement)
+        check(n.getBool("HDRImageEnhancementEnable") == config.hdrEnhancement) { "HDR enhancement readback mismatch" }
+        n.ensureEnum("BalanceWhiteAuto", "Off")
+        check(n.getEnum("BalanceWhiteAuto") == "Off") { "White balance auto still enabled" }
+
     }
 
     /** The preview, switching back from a capture's raw format first if need be. */
@@ -136,7 +154,8 @@ class TritonCamera : LucidCamera("Triton") {
             n.ensureBool("AcquisitionFrameRateEnable", true)
             // No faster than a long exposure allows; see setExposureLocked.
             val bound = 1e6 / (n.getFloat("ExposureTime") + FRAME_MARGIN_US)
-            n.setFloat("AcquisitionFrameRate", minOf(config.previewFps, bound).coerceAtLeast(MIN_FPS))
+            val ceiling = if (n.getEnum("PixelFormat") == CAPTURE_FORMAT) 1.0 else config.previewFps
+            n.setFloat("AcquisitionFrameRate", minOf(ceiling, bound).coerceAtLeast(MIN_FPS))
         }
         frameRate = runCatching { n.getFloat("AcquisitionFrameRate") }.getOrDefault(0.0)
         exposureUs = runCatching { n.getFloat("ExposureTime") }.getOrDefault(0.0)
@@ -162,10 +181,10 @@ class TritonCamera : LucidCamera("Triton") {
         val n = requireNodes(); n.min("Gain")..n.max("Gain")
     }
 
-    private fun setExposureLocked(n: NodeMap, us: Double): Double {
+    private fun setExposureLocked(n: NodeMap, us: Double, maxFps: Double = config.previewFps): Double {
         // The frame period bounds the exposure: a long one brings the rate down first, and
         // a short one after a long one lets it back up to the preview's afterwards.
-        val fps = minOf(config.previewFps, 1e6 / (us + FRAME_MARGIN_US)).coerceAtLeast(MIN_FPS)
+        val fps = minOf(maxFps, 1e6 / (us + FRAME_MARGIN_US)).coerceAtLeast(MIN_FPS)
         val rated = n.getBool("AcquisitionFrameRateEnable")
         if (rated && fps < n.getFloat("AcquisitionFrameRate")) n.setFloat("AcquisitionFrameRate", fps)
         n.setFloat("ExposureTime", us.coerceIn(n.min("ExposureTime"), n.max("ExposureTime")))
@@ -214,6 +233,35 @@ class TritonCamera : LucidCamera("Triton") {
     /** The newest preview frame (BayerRG8), or null before the first. */
     fun latestFrame(): RawFrame? = latest?.takeIf { it.pixelFormat == PREVIEW_CODE }
 
+    /** Never silently substitute a clamped exposure for a measured reference. */
+    fun captureAtExposure(requestedUs: Double, fixedGainDb: Double): Result<Capture> = runCatching {
+        require(requestedUs.isFinite() && requestedUs > 0)
+        stopStreaming()
+        // RG8 -> RG24 changes sensor timing (613.456 -> 625.640 us on the rig).
+        // Configure the final format before writing or validating the integration.
+        val applied = synchronized(nodeLock) {
+            val n = requireNodes()
+            raw(n)
+            n.ensureEnum("ExposureAuto", "Off")
+            n.ensureBool("AcquisitionFrameRateEnable", true)
+            // RG24 is 16 MB; do not send it at the 5 fps preview rate on this link.
+            setExposureLocked(n, requestedUs, maxFps = 1.0)
+        }
+        Log.i(TAG, "reference requested=$requestedUs us applied=$applied us rate=$frameRate fps")
+        requireExposure(requestedUs, applied)
+        val appliedGain = setGain(fixedGainDb)
+        check(kotlin.math.abs(appliedGain - fixedGainDb) <= 0.01) { "Camera changed gain to $appliedGain dB" }
+        val first = capture()
+        val result = if (first.exceptionOrNull()?.message?.startsWith("no Triton frame within") == true) {
+            // grabFrame stops in finally, so this retry starts a fresh acquisition.
+            Log.w(TAG, "reference frame timeout; retrying one fresh acquisition", first.exceptionOrNull())
+            capture().getOrThrow()
+        } else first.getOrThrow()
+        requireExposure(requestedUs, result.settings.exposureUs)
+        check(kotlin.math.abs(result.settings.gainDb - fixedGainDb) <= 0.01) { "Capture gain changed" }
+        result
+    }
+
     /**
      * One raw 24-bit frame, exposed after this call. The camera is left stopped in the raw
      * format, so that the next capture need not switch; [startStreaming] brings the
@@ -233,6 +281,10 @@ class TritonCamera : LucidCamera("Triton") {
                 hdrOutput = runCatching { n.getEnum("HDROutput") }.getOrDefault("?"),
                 temperatureC = runCatching { n.getFloat("DeviceTemperature") }.getOrNull(),
                 hdrEnhancement = runCatching { n.getBool("HDRImageEnhancementEnable") }.getOrNull(),
+                blackLevel = n.getFloat("BlackLevel").also { check(it.isFinite()) { "Invalid camera BlackLevel readback" } },
+                blackLevelSelector = runCatching { n.getEnum("BlackLevelSelector") }.getOrNull(),
+                hdrDigitalClamping = n.getBool("HDRDigitalClampingEnable"),
+                hdrImageEnhancement = n.getBool("HDRImageEnhancementEnable"),
             )
         }
         Log.i(TAG, "capture: block ${g.frame.blockId} ${g.frame.width}x${g.frame.height}, %.0f ms after start".format(
@@ -245,7 +297,7 @@ class TritonCamera : LucidCamera("Triton") {
      * The format switch, which the GVCP retries wait out on their own, then two frame
      * periods and a raw frame's time on the link.
      */
-    private fun captureTimeoutMs() = (2000 / frameRate.coerceAtLeast(MIN_FPS)).toLong() + 3000
+    private fun captureTimeoutMs() = frameTimeoutMs(exposureUs, frameRate)
 
     override fun describeLocked(): String {
         val n = nodes!!
@@ -255,7 +307,19 @@ class TritonCamera : LucidCamera("Triton") {
         )
     }
 
+
     companion object {
+        internal fun frameTimeoutMs(exposureUs: Double, fps: Double): Long {
+            val periodMs = maxOf(exposureUs / 1000.0, 1000.0 / fps.coerceAtLeast(MIN_FPS))
+            return maxOf(8_000L, (3 * periodMs).toLong() + 5_000L)
+        }
+        internal fun requireExposure(requestedUs: Double, actualUs: Double) {
+            require(requestedUs.isFinite() && requestedUs > 0)
+            // Permit a sensor timing step, not a materially shorter integration.
+            check(actualUs.isFinite() && actualUs > 0 && kotlin.math.abs(requestedUs - actualUs) <= 25.0) {
+                "Requested ${requestedUs / 1e6} s, camera applied ${actualUs / 1e6} s; reference not saved"
+            }
+        }
         private const val TAG = "Triton"
         const val PREVIEW_FORMAT = "BayerRG8"
 
