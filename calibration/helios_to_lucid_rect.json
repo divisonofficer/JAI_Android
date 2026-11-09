@@ -1,0 +1,35 @@
+{
+  "name": "helios_to_lucid_rect_v1",
+  "image_frame": "Lucid raw frame (2880x1860, not rotated) undistorted with calibration/lucid_intrinsics_colmap.json to its 'rectified' pinhole K",
+  "depth_frame": "Helios camera frame, millimetres (Coord3D_ABCY16 X, Y, Z)",
+  "model": "pinhole, no distortion: [u v 1]^T ~ K_rect (dR_seq R X + t); dR_seq from helios_to_lucid_sag.json (rotation vector, degrees), identity when unverified",
+  "image_width": 2880,
+  "image_height": 1860,
+  "fx": 2088.0,
+  "fy": 2088.0,
+  "cx": 1440.0,
+  "cy": 930.0,
+  "R": [
+    0.9999680241346012,
+    0.001274565696288371,
+    0.007894693827346701,
+    -0.001038078190395623,
+    0.999552737523727,
+    -0.02988724313974189,
+    -0.00792925608189861,
+    0.02987809215979609,
+    0.9995220990587844
+  ],
+  "t_mm": [
+    68.90645808229627,
+    72.86185203466344,
+    -36.348657972254834
+  ],
+  "pairs": 42,
+  "inliers": 38,
+  "rms_px": 8.918969233253232,
+  "loo_median_px": 17.12429161419922,
+  "prior_deg": 1.0,
+  "intrinsics_source": "calibration/lucid_intrinsics_colmap.json",
+  "note": "The Helios sags against the Lucid as the rig tilts (pitch up to ~6 deg looking up), so one fixed transform cannot fit every sequence: R, t are the rig's pose, helios_to_lucid_sag.json the per-sequence deviation."
+}

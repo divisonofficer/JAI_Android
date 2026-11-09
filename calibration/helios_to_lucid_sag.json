@@ -1,0 +1,1954 @@
+{
+ "note": "Per capture sequence: the Helios's extra rotation against helios_to_lucid_rect.json (rotation vector in degrees, applied as dR @ R), and how it is known. 'unverified' depth may be misaligned by the rig's sag; do not trust it for pixel-level alignment.",
+ "statuses": {
+  "corrected": "fitted from >= 2 hand-picked pairs of the sequence",
+  "auto": "pitch from correlating the Helios intensity with the Lucid flash-only image (on short - off short); peak inside -1.5..6.5 deg, corr >= 0.15, prominence >= 0.08",
+  "unverified": "neither; identity rotation"
+ },
+ "sequences": {
+  "20261022_192157_264": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 0.35,
+    "corr": 0.06,
+    "prominence": 0.056,
+    "points": 1536
+   }
+  },
+  "20261022_192359_972": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.026,
+    "prominence": 0.024,
+    "points": 20000
+   }
+  },
+  "20261022_192442_056": {
+   "status": "corrected",
+   "rotation_deg": [
+    -0.503,
+    -0.215,
+    -0.316
+   ],
+   "pairs": 6,
+   "rms_px": 10.69,
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": -0.018,
+    "prominence": 0.142,
+    "points": 20000
+   }
+  },
+  "20261022_192542_325": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": -0.092,
+    "prominence": 0.108,
+    "points": 20000
+   }
+  },
+  "20261022_192635_771": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.12,
+    "prominence": 0.161,
+    "points": 20000
+   }
+  },
+  "20261022_192740_266": {
+   "status": "corrected",
+   "rotation_deg": [
+    -0.36,
+    0.011,
+    0.212
+   ],
+   "pairs": 4,
+   "rms_px": 8.79,
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.103,
+    "prominence": 0.209,
+    "points": 20000
+   }
+  },
+  "20261022_192817_089": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.063,
+    "prominence": 0.207,
+    "points": 20000
+   }
+  },
+  "20261022_192855_430": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.029,
+    "prominence": 0.136,
+    "points": 20000
+   }
+  },
+  "20261022_192924_965": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.101,
+    "prominence": 0.164,
+    "points": 20000
+   }
+  },
+  "20261022_193001_139": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.023,
+    "prominence": 0.161,
+    "points": 20000
+   }
+  },
+  "20261022_193034_155": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.112,
+    "prominence": 0.14,
+    "points": 20000
+   }
+  },
+  "20261022_193102_773": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.379,
+    "prominence": 0.104,
+    "points": 20000
+   }
+  },
+  "20261022_193131_633": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.325,
+    "prominence": 0.13,
+    "points": 20000
+   }
+  },
+  "20261022_193205_010": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.312,
+    "prominence": 0.168,
+    "points": 20000
+   }
+  },
+  "20261022_193248_877": {
+   "status": "auto",
+   "rotation_deg": [
+    5.45,
+    0.0,
+    0.0
+   ],
+   "corr": 0.287,
+   "prominence": 0.234,
+   "auto": {
+    "pitch_deg": 5.45,
+    "corr": 0.287,
+    "prominence": 0.234,
+    "points": 7315
+   }
+  },
+  "20261022_193323_786": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -1.85,
+    "corr": 0.462,
+    "prominence": 0.415,
+    "points": 7888
+   }
+  },
+  "20261022_193402_769": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -1.4,
+    "corr": 0.07,
+    "prominence": 0.239,
+    "points": 2385
+   }
+  },
+  "20261022_193430_834": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -1.85,
+    "corr": 0.046,
+    "prominence": 0.117,
+    "points": 6373
+   }
+  },
+  "20261022_193509_147": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.395,
+    "prominence": 0.245,
+    "points": 20000
+   }
+  },
+  "20261022_193539_214": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.097,
+    "prominence": 0.211,
+    "points": 20000
+   }
+  },
+  "20261022_193617_981": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.214,
+    "prominence": 0.201,
+    "points": 20000
+   }
+  },
+  "20261022_193649_586": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.258,
+    "prominence": 0.216,
+    "points": 20000
+   }
+  },
+  "20261022_193718_738": {
+   "status": "corrected",
+   "rotation_deg": [
+    -0.275,
+    -0.138,
+    -0.151
+   ],
+   "pairs": 3,
+   "rms_px": 6.33,
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.312,
+    "prominence": 0.196,
+    "points": 20000
+   }
+  },
+  "20261022_193748_853": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.299,
+    "prominence": 0.203,
+    "points": 20000
+   }
+  },
+  "20261022_193818_359": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.271,
+    "prominence": 0.28,
+    "points": 20000
+   }
+  },
+  "20261022_193857_084": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.241,
+    "prominence": 0.229,
+    "points": 20000
+   }
+  },
+  "20261022_193934_715": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.268,
+    "prominence": 0.281,
+    "points": 20000
+   }
+  },
+  "20261022_194015_168": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.064,
+    "prominence": 0.299,
+    "points": 20000
+   }
+  },
+  "20261022_194053_271": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.254,
+    "prominence": 0.302,
+    "points": 20000
+   }
+  },
+  "20261022_194128_069": {
+   "status": "corrected",
+   "rotation_deg": [
+    -0.478,
+    0.146,
+    0.701
+   ],
+   "pairs": 3,
+   "rms_px": 9.87,
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.312,
+    "prominence": 0.259,
+    "points": 20000
+   }
+  },
+  "20261022_194208_016": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 6.9,
+    "corr": 0.347,
+    "prominence": 0.216,
+    "points": 20000
+   }
+  },
+  "20261022_194237_449": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.442,
+    "prominence": 0.276,
+    "points": 20000
+   }
+  },
+  "20261022_194305_350": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.481,
+    "prominence": 0.332,
+    "points": 20000
+   }
+  },
+  "20261022_194340_451": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": null,
+    "why": "only 1 depth points"
+   }
+  },
+  "20261022_194437_188": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": null,
+    "why": "only 287 depth points"
+   }
+  },
+  "20261022_194515_923": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": null,
+    "why": "only 43 depth points"
+   }
+  },
+  "20261022_194548_283": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": null,
+    "why": "only 214 depth points"
+   }
+  },
+  "20261022_194615_496": {
+   "status": "auto",
+   "rotation_deg": [
+    3.15,
+    0.0,
+    0.0
+   ],
+   "corr": 0.2,
+   "prominence": 0.195,
+   "auto": {
+    "pitch_deg": 3.15,
+    "corr": 0.2,
+    "prominence": 0.195,
+    "points": 20000
+   }
+  },
+  "20261022_194656_873": {
+   "status": "auto",
+   "rotation_deg": [
+    2.95,
+    0.0,
+    0.0
+   ],
+   "corr": 0.209,
+   "prominence": 0.093,
+   "auto": {
+    "pitch_deg": 2.95,
+    "corr": 0.209,
+    "prominence": 0.093,
+    "points": 20000
+   }
+  },
+  "20261022_194726_912": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.531,
+    "prominence": 0.236,
+    "points": 20000
+   }
+  },
+  "20261022_194817_142": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.368,
+    "prominence": 0.303,
+    "points": 20000
+   }
+  },
+  "20261022_194844_037": {
+   "status": "corrected",
+   "rotation_deg": [
+    -0.102,
+    0.023,
+    0.385
+   ],
+   "pairs": 2,
+   "rms_px": 2.63,
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.26,
+    "prominence": 0.244,
+    "points": 20000
+   }
+  },
+  "20261022_194914_871": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.211,
+    "prominence": 0.278,
+    "points": 20000
+   }
+  },
+  "20261022_194950_659": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.079,
+    "prominence": 0.268,
+    "points": 20000
+   }
+  },
+  "20261022_195014_060": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.013,
+    "prominence": 0.207,
+    "points": 20000
+   }
+  },
+  "20261022_195040_132": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.179,
+    "prominence": 0.307,
+    "points": 20000
+   }
+  },
+  "20261022_195139_707": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.253,
+    "prominence": 0.252,
+    "points": 20000
+   }
+  },
+  "20261022_195215_016": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.117,
+    "prominence": 0.271,
+    "points": 20000
+   }
+  },
+  "20261022_195258_017": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.038,
+    "prominence": 0.231,
+    "points": 20000
+   }
+  },
+  "20261022_195333_772": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.276,
+    "prominence": 0.161,
+    "points": 20000
+   }
+  },
+  "20261022_195418_774": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.404,
+    "prominence": 0.324,
+    "points": 20000
+   }
+  },
+  "20261022_195516_916": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 2.3,
+    "corr": 0.379,
+    "prominence": 0.042,
+    "points": 9956
+   }
+  },
+  "20261022_195602_447": {
+   "status": "auto",
+   "rotation_deg": [
+    1.05,
+    0.0,
+    0.0
+   ],
+   "corr": 0.331,
+   "prominence": 0.088,
+   "auto": {
+    "pitch_deg": 1.05,
+    "corr": 0.331,
+    "prominence": 0.088,
+    "points": 10824
+   }
+  },
+  "20261022_195650_484": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 1.6,
+    "corr": -0.154,
+    "prominence": 0.046,
+    "points": 4421
+   }
+  },
+  "20261022_195735_933": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.142,
+    "prominence": 0.311,
+    "points": 20000
+   }
+  },
+  "20261022_195805_065": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.147,
+    "prominence": 0.268,
+    "points": 20000
+   }
+  },
+  "20261022_195835_278": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.436,
+    "prominence": 0.352,
+    "points": 20000
+   }
+  },
+  "20261022_195936_210": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.374,
+    "prominence": 0.27,
+    "points": 20000
+   }
+  },
+  "20261022_200003_410": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.266,
+    "prominence": 0.32,
+    "points": 20000
+   }
+  },
+  "20261022_200045_030": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.103,
+    "prominence": 0.157,
+    "points": 20000
+   }
+  },
+  "20261022_200123_960": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.364,
+    "prominence": 0.3,
+    "points": 20000
+   }
+  },
+  "20261022_200204_828": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate; 1 inlier pair(s)",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.348,
+    "prominence": 0.211,
+    "points": 20000
+   }
+  },
+  "20261022_200252_133": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.244,
+    "prominence": 0.269,
+    "points": 20000
+   }
+  },
+  "20261022_200334_142": {
+   "status": "auto",
+   "rotation_deg": [
+    3.15,
+    0.0,
+    0.0
+   ],
+   "corr": 0.345,
+   "prominence": 0.093,
+   "auto": {
+    "pitch_deg": 3.15,
+    "corr": 0.345,
+    "prominence": 0.093,
+    "points": 20000
+   }
+  },
+  "20261022_200419_507": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 3.0,
+    "corr": 0.285,
+    "prominence": 0.059,
+    "points": 20000
+   }
+  },
+  "20261022_200457_961": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -0.25,
+    "corr": 0.438,
+    "prominence": 0.061,
+    "points": 20000
+   }
+  },
+  "20261022_200539_052": {
+   "status": "auto",
+   "rotation_deg": [
+    4.95,
+    0.0,
+    0.0
+   ],
+   "corr": 0.42,
+   "prominence": 0.151,
+   "auto": {
+    "pitch_deg": 4.95,
+    "corr": 0.42,
+    "prominence": 0.151,
+    "points": 18027
+   }
+  },
+  "20261022_200622_923": {
+   "status": "corrected",
+   "rotation_deg": [
+    5.149,
+    0.117,
+    -0.249
+   ],
+   "pairs": 2,
+   "rms_px": 9.92,
+   "auto": {
+    "pitch_deg": 6.85,
+    "corr": -0.039,
+    "prominence": 0.092,
+    "points": 6000
+   }
+  },
+  "20261022_200704_530": {
+   "status": "corrected",
+   "rotation_deg": [
+    4.998,
+    -0.075,
+    -0.037
+   ],
+   "pairs": 2,
+   "rms_px": 14.1,
+   "auto": {
+    "pitch_deg": 6.6,
+    "corr": -0.025,
+    "prominence": 0.09,
+    "points": 5972
+   }
+  },
+  "20261022_200750_370": {
+   "status": "corrected",
+   "rotation_deg": [
+    -0.157,
+    -0.119,
+    0.455
+   ],
+   "pairs": 3,
+   "rms_px": 12.0,
+   "auto": {
+    "pitch_deg": 1.2,
+    "corr": 0.66,
+    "prominence": 0.049,
+    "points": 13539
+   }
+  },
+  "20261022_200832_223": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.18,
+    "prominence": 0.305,
+    "points": 20000
+   }
+  },
+  "20261022_200902_075": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.315,
+    "prominence": 0.379,
+    "points": 20000
+   }
+  },
+  "20261022_200930_512": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.378,
+    "prominence": 0.292,
+    "points": 20000
+   }
+  },
+  "20261022_200955_655": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.192,
+    "prominence": 0.32,
+    "points": 20000
+   }
+  },
+  "20261022_201038_258": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.571,
+    "prominence": 0.174,
+    "points": 20000
+   }
+  },
+  "20261022_201108_053": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.178,
+    "prominence": 0.263,
+    "points": 20000
+   }
+  },
+  "20261022_201137_363": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": -0.054,
+    "prominence": 0.203,
+    "points": 20000
+   }
+  },
+  "20261022_201203_860": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.315,
+    "prominence": 0.228,
+    "points": 20000
+   }
+  },
+  "20261022_201251_139": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.142,
+    "prominence": 0.237,
+    "points": 20000
+   }
+  },
+  "20261022_201318_693": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.333,
+    "prominence": 0.282,
+    "points": 20000
+   }
+  },
+  "20261022_201356_463": {
+   "status": "corrected",
+   "rotation_deg": [
+    3.226,
+    -0.109,
+    -0.816
+   ],
+   "pairs": 3,
+   "rms_px": 7.95,
+   "auto": {
+    "pitch_deg": 3.15,
+    "corr": 0.282,
+    "prominence": 0.097,
+    "points": 10645
+   }
+  },
+  "20261022_201440_704": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": null,
+    "why": "only 185 depth points"
+   }
+  },
+  "20261022_201539_392": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 2.9,
+    "corr": -0.101,
+    "prominence": 0.094,
+    "points": 20000
+   }
+  },
+  "20261022_201612_979": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.281,
+    "prominence": 0.311,
+    "points": 20000
+   }
+  },
+  "20261022_201641_904": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.201,
+    "prominence": 0.319,
+    "points": 20000
+   }
+  },
+  "20261022_201713_516": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.229,
+    "prominence": 0.288,
+    "points": 20000
+   }
+  },
+  "20261022_201941_091": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.551,
+    "prominence": 0.21,
+    "points": 20000
+   }
+  },
+  "20261022_202008_266": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": -0.324,
+    "prominence": 0.109,
+    "points": 20000
+   }
+  },
+  "20261022_202037_624": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": -0.296,
+    "prominence": 0.107,
+    "points": 20000
+   }
+  },
+  "20261022_202111_991": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.42,
+    "prominence": 0.157,
+    "points": 20000
+   }
+  },
+  "20261022_202202_280": {
+   "status": "auto",
+   "rotation_deg": [
+    0.15,
+    0.0,
+    0.0
+   ],
+   "corr": 0.677,
+   "prominence": 0.19,
+   "auto": {
+    "pitch_deg": 0.15,
+    "corr": 0.677,
+    "prominence": 0.19,
+    "points": 20000
+   }
+  },
+  "20261022_202236_636": {
+   "status": "auto",
+   "rotation_deg": [
+    0.2,
+    0.0,
+    0.0
+   ],
+   "corr": 0.595,
+   "prominence": 0.159,
+   "auto": {
+    "pitch_deg": 0.2,
+    "corr": 0.595,
+    "prominence": 0.159,
+    "points": 20000
+   }
+  },
+  "20261022_202309_087": {
+   "status": "auto",
+   "rotation_deg": [
+    0.5,
+    0.0,
+    0.0
+   ],
+   "corr": 0.579,
+   "prominence": 0.119,
+   "auto": {
+    "pitch_deg": 0.5,
+    "corr": 0.579,
+    "prominence": 0.119,
+    "points": 20000
+   }
+  },
+  "20261022_202345_403": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 6.55,
+    "corr": 0.187,
+    "prominence": 0.206,
+    "points": 20000
+   }
+  },
+  "20261022_202413_257": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.313,
+    "prominence": 0.278,
+    "points": 20000
+   }
+  },
+  "20261022_202505_287": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": null,
+    "why": "only 1 depth points"
+   }
+  },
+  "20261022_202550_738": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": null,
+    "why": "only 1 depth points"
+   }
+  },
+  "20261022_202651_873": {
+   "status": "auto",
+   "rotation_deg": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "corr": 0.271,
+   "prominence": 0.121,
+   "auto": {
+    "pitch_deg": 1.0,
+    "corr": 0.271,
+    "prominence": 0.121,
+    "points": 20000
+   }
+  },
+  "20261022_202719_895": {
+   "status": "auto",
+   "rotation_deg": [
+    0.9,
+    0.0,
+    0.0
+   ],
+   "corr": 0.545,
+   "prominence": 0.21,
+   "auto": {
+    "pitch_deg": 0.9,
+    "corr": 0.545,
+    "prominence": 0.21,
+    "points": 20000
+   }
+  },
+  "20261022_202752_863": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -2.0,
+    "corr": 0.304,
+    "prominence": 0.215,
+    "points": 20000
+   }
+  },
+  "20261022_202832_010": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -0.9,
+    "corr": 0.537,
+    "prominence": 0.02,
+    "points": 20000
+   }
+  },
+  "20261022_202922_914": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.071,
+    "prominence": 0.109,
+    "points": 20000
+   }
+  },
+  "20261022_202953_703": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -0.85,
+    "corr": 0.094,
+    "prominence": 0.131,
+    "points": 20000
+   }
+  },
+  "20261022_203044_871": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.95,
+    0.0,
+    0.0
+   ],
+   "corr": 0.313,
+   "prominence": 0.144,
+   "auto": {
+    "pitch_deg": -0.95,
+    "corr": 0.313,
+    "prominence": 0.144,
+    "points": 20000
+   }
+  },
+  "20261022_203115_183": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -0.8,
+    "corr": 0.132,
+    "prominence": 0.079,
+    "points": 20000
+   }
+  },
+  "20261022_203302_369": {
+   "status": "auto",
+   "rotation_deg": [
+    3.0,
+    0.0,
+    0.0
+   ],
+   "corr": 0.831,
+   "prominence": 0.342,
+   "auto": {
+    "pitch_deg": 3.0,
+    "corr": 0.831,
+    "prominence": 0.342,
+    "points": 20000
+   }
+  },
+  "20261022_203340_693": {
+   "status": "auto",
+   "rotation_deg": [
+    2.8,
+    0.0,
+    0.0
+   ],
+   "corr": 0.593,
+   "prominence": 0.259,
+   "auto": {
+    "pitch_deg": 2.8,
+    "corr": 0.593,
+    "prominence": 0.259,
+    "points": 12214
+   }
+  },
+  "20261022_203422_225": {
+   "status": "corrected",
+   "rotation_deg": [
+    1.625,
+    0.284,
+    -0.066
+   ],
+   "pairs": 2,
+   "rms_px": 3.44,
+   "auto": {
+    "pitch_deg": 1.75,
+    "corr": 0.465,
+    "prominence": 0.167,
+    "points": 20000
+   }
+  },
+  "20261022_203457_908": {
+   "status": "auto",
+   "rotation_deg": [
+    -1.05,
+    0.0,
+    0.0
+   ],
+   "corr": 0.425,
+   "prominence": 0.174,
+   "auto": {
+    "pitch_deg": -1.05,
+    "corr": 0.425,
+    "prominence": 0.174,
+    "points": 20000
+   }
+  },
+  "20261022_203526_494": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 7.0,
+    "corr": 0.1,
+    "prominence": 0.051,
+    "points": 20000
+   }
+  },
+  "20261022_203558_125": {
+   "status": "corrected",
+   "rotation_deg": [
+    -0.864,
+    0.024,
+    0.042
+   ],
+   "pairs": 4,
+   "rms_px": 9.48,
+   "auto": {
+    "pitch_deg": -0.95,
+    "corr": 0.189,
+    "prominence": 0.09,
+    "points": 20000
+   }
+  },
+  "20261022_203643_066": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": 1.95,
+    "corr": 0.561,
+    "prominence": 0.028,
+    "points": 20000
+   }
+  },
+  "20261022_203708_291": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.9,
+    0.0,
+    0.0
+   ],
+   "corr": 0.386,
+   "prominence": 0.215,
+   "auto": {
+    "pitch_deg": -0.9,
+    "corr": 0.386,
+    "prominence": 0.215,
+    "points": 20000
+   }
+  },
+  "20261022_203740_692": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -1.65,
+    "corr": -0.015,
+    "prominence": 0.133,
+    "points": 6518
+   }
+  },
+  "20261022_203839_598": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.35,
+    0.0,
+    0.0
+   ],
+   "corr": 0.173,
+   "prominence": 0.213,
+   "auto": {
+    "pitch_deg": -0.35,
+    "corr": 0.173,
+    "prominence": 0.213,
+    "points": 5075
+   }
+  },
+  "20261022_203916_624": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -0.15,
+    "corr": 0.329,
+    "prominence": 0.028,
+    "points": 20000
+   }
+  },
+  "20261022_203944_461": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.45,
+    0.0,
+    0.0
+   ],
+   "corr": 0.547,
+   "prominence": 0.192,
+   "auto": {
+    "pitch_deg": -0.45,
+    "corr": 0.547,
+    "prominence": 0.192,
+    "points": 20000
+   }
+  },
+  "20261022_204015_004": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.55,
+    0.0,
+    0.0
+   ],
+   "corr": 0.271,
+   "prominence": 0.136,
+   "auto": {
+    "pitch_deg": -0.55,
+    "corr": 0.271,
+    "prominence": 0.136,
+    "points": 20000
+   }
+  },
+  "20261022_204105_738": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.8,
+    0.0,
+    0.0
+   ],
+   "corr": 0.669,
+   "prominence": 0.166,
+   "auto": {
+    "pitch_deg": -0.8,
+    "corr": 0.669,
+    "prominence": 0.166,
+    "points": 20000
+   }
+  },
+  "20261022_204130_193": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.15,
+    0.0,
+    0.0
+   ],
+   "corr": 0.602,
+   "prominence": 0.144,
+   "auto": {
+    "pitch_deg": -0.15,
+    "corr": 0.602,
+    "prominence": 0.144,
+    "points": 20000
+   }
+  },
+  "20261022_204202_916": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.6,
+    0.0,
+    0.0
+   ],
+   "corr": 0.726,
+   "prominence": 0.152,
+   "auto": {
+    "pitch_deg": -0.6,
+    "corr": 0.726,
+    "prominence": 0.152,
+    "points": 20000
+   }
+  },
+  "20261022_204250_237": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -0.2,
+    "corr": 0.169,
+    "prominence": 0.04,
+    "points": 20000
+   }
+  },
+  "20261022_204319_829": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.55,
+    0.0,
+    0.0
+   ],
+   "corr": 0.845,
+   "prominence": 0.106,
+   "auto": {
+    "pitch_deg": -0.55,
+    "corr": 0.845,
+    "prominence": 0.106,
+    "points": 20000
+   }
+  },
+  "20261022_204350_868": {
+   "status": "auto",
+   "rotation_deg": [
+    -1.45,
+    0.0,
+    0.0
+   ],
+   "corr": 0.571,
+   "prominence": 0.328,
+   "auto": {
+    "pitch_deg": -1.45,
+    "corr": 0.571,
+    "prominence": 0.328,
+    "points": 18956
+   }
+  },
+  "20261022_204431_576": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.35,
+    0.0,
+    0.0
+   ],
+   "corr": 0.779,
+   "prominence": 0.465,
+   "auto": {
+    "pitch_deg": -0.35,
+    "corr": 0.779,
+    "prominence": 0.465,
+    "points": 20000
+   }
+  },
+  "20261022_204517_823": {
+   "status": "corrected",
+   "rotation_deg": [
+    -0.538,
+    -0.165,
+    0.233
+   ],
+   "pairs": 2,
+   "rms_px": 0.79,
+   "auto": {
+    "pitch_deg": -0.65,
+    "corr": 0.429,
+    "prominence": 0.105,
+    "points": 20000
+   }
+  },
+  "20261022_204546_256": {
+   "status": "auto",
+   "rotation_deg": [
+    -0.7,
+    0.0,
+    0.0
+   ],
+   "corr": 0.346,
+   "prominence": 0.113,
+   "auto": {
+    "pitch_deg": -0.7,
+    "corr": 0.346,
+    "prominence": 0.113,
+    "points": 20000
+   }
+  },
+  "20261022_204611_641": {
+   "status": "unverified",
+   "rotation_deg": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "why": "no pairs of its own and no reliable image-based estimate",
+   "auto": {
+    "pitch_deg": -0.45,
+    "corr": 0.782,
+    "prominence": 0.047,
+    "points": 20000
+   }
+  }
+ }
+}

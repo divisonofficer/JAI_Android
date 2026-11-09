@@ -1,0 +1,24 @@
+{
+  "name": "lucid_intrinsics_v1",
+  "created": "2026-10-23",
+  "camera": "Lucid Triton TRI054S-C (IMX490), s/n 224201585",
+  "image_frame": "Lucid raw frame as sent: 2880x1860 BayerRG24, not rotated; pixel centres on integers",
+  "model": "OpenCV (COLMAP OPENCV): x' = X/Z, y' = Y/Z, r^2 = x'^2 + y'^2, d = 1 + k1 r^2 + k2 r^4; u = fx*(x'*d + 2*p1*x'*y' + p2*(r^2 + 2*x'^2)) + cx, v = fy*(y'*d + p1*(r^2 + 2*y'^2) + 2*p2*x'*y') + cy",
+  "image_width": 2880,
+  "image_height": 1860,
+  "fx": 2089.3, "fy": 2087.4, "cx": 1432.3, "cy": 930.25,
+  "k1": -0.16844, "k2": 0.07076, "p1": -0.00002, "p2": 0.00036,
+  "rectified": {
+    "note": "cv2.initUndistortRectifyMap(K, dist, None, K_rect, (2880, 1860)) with no rotation; the rectified frame fills the image (barrel distortion: the source's edges are trimmed), pinhole with no distortion",
+    "fx": 2088.0, "fy": 2088.0, "cx": 1440.0, "cy": 930.0
+  },
+  "source": {
+    "method": "COLMAP 3.13 (pycolmap) incremental SfM, one shared OPENCV camera, focal length, principal point and distortion refined in bundle adjustment",
+    "images": "flash_off_long (0.5 s) frames of scene_1023_2 (Pixel 9 Pro XL, 2026-10-22), demosaiced, log-toned and CLAHE'd for features; geometry untouched",
+    "estimates": [
+      {"model_images": 56, "points": 11741, "mean_reproj_px": 0.719, "fx": 2089.148, "fy": 2090.033, "cx": 1431.919, "cy": 930.270, "k1": -0.16887, "k2": 0.07138, "p1": -0.00008, "p2": 0.00035},
+      {"model_images": 22, "points": 3071, "mean_reproj_px": 0.624, "fx": 2089.510, "fy": 2084.816, "cx": 1432.718, "cy": 930.229, "k1": -0.16801, "k2": 0.07013, "p1": 0.00012, "p2": 0.00036}
+    ],
+    "values_above": "mean of the two independent reconstructions; smaller ones (4-8 images) were not used"
+  }
+}
